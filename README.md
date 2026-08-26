@@ -156,7 +156,7 @@ and approve. The resulting refresh token is written to
 
 If you're on a headless machine without a local browser, use
 `--no-browser` and open the printed URL yourself (e.g. via an SSH tunnel:
-`ssh -L <port>:localhost:<port> this-machine`).
+`ssh -L <port>:localhost:<port> <remote-host>`).
 
 You will not need to log in again after this; `gcal-sync` refreshes access
 tokens automatically using the stored refresh tokens.
@@ -201,7 +201,7 @@ uv run gcal-sync start
 
 ## 7. Run continuously
 
-### Option A — Podman (recommended, since it's available on this machine)
+### Option A — Podman (recommended if you have Docker/Podman available)
 
 ```bash
 podman build -t gcal-sync -f deploy/Dockerfile .
