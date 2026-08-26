@@ -1,0 +1,12 @@
+services:
+  gcal-sync:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: gcal-sync
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    command: ["start"]

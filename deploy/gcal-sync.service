@@ -1,0 +1,14 @@
+[Unit]
+Description=Google Calendar bidirectional availability sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/anton/Work/gcal-sync
+ExecStart=/usr/bin/env uv run gcal-sync start
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
