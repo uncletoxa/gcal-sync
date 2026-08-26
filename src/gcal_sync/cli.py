@@ -27,7 +27,7 @@ def main():
 
 
 @main.command()
-@click.option("--account", type=click.Choice(["workspace", "personal"]), required=True)
+@click.option("--account", required=True, help="Account key, e.g. 'workspace', 'personal', 'team' (must match a key used in CALENDARS).")
 @click.option("--no-browser", is_flag=True, help="Print the authorization URL instead of opening a browser.")
 def auth(account, no_browser):
     """Authorize a Google account via the loopback (Desktop app) OAuth flow."""
@@ -41,7 +41,7 @@ def auth(account, no_browser):
 
 
 @main.command()
-@click.option("--account", type=click.Choice(["workspace", "personal"]), required=True)
+@click.option("--account", required=True, help="Account key previously authorized with `gcal-sync auth`.")
 def calendars(account):
     """List calendars visible to an authorized account, to help find calendar IDs."""
     cfg = load_config(require_calendars=False)
@@ -57,11 +57,10 @@ def calendars(account):
 
 
 def _build_clients(cfg):
-    workspace_creds = load_credentials("workspace", cfg.token_dir)
-    personal_creds = load_credentials("personal", cfg.token_dir)
-    workspace_client = GoogleCalendarClient(workspace_creds, "workspace")
-    personal_client = GoogleCalendarClient(personal_creds, "personal")
-    return workspace_client, personal_client
+    return {
+        account: GoogleCalendarClient(load_credentials(account, cfg.token_dir), account)
+        for account in cfg.calendars
+    }
 
 
 @main.command()
@@ -72,8 +71,8 @@ def sync(dry_run):
     setup_logging(cfg.log_level)
     db = Database(cfg.db_path)
     try:
-        workspace_client, personal_client = _build_clients(cfg)
-        run_sync_pass(cfg, db, workspace_client, personal_client, dry_run=dry_run)
+        clients = _build_clients(cfg)
+        run_sync_pass(cfg, db, clients, dry_run=dry_run)
     except AuthenticationError as exc:
         _fail(exc)
     finally:
@@ -100,8 +99,8 @@ def start(dry_run):
     try:
         while not shutdown["flag"]:
             try:
-                workspace_client, personal_client = _build_clients(cfg)
-                run_sync_pass(cfg, db, workspace_client, personal_client, dry_run=dry_run)
+                clients = _build_clients(cfg)
+                run_sync_pass(cfg, db, clients, dry_run=dry_run)
             except Exception:
                 logger.exception("sync_pass_failed")
 

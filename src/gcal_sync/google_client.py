@@ -33,7 +33,12 @@ class CalendarClient(ABC):
 
     @abstractmethod
     def list_events(
-        self, calendar_id: str, sync_token: Optional[str] = None, page_token: Optional[str] = None
+        self,
+        calendar_id: str,
+        sync_token: Optional[str] = None,
+        page_token: Optional[str] = None,
+        time_min: Optional[str] = None,
+        time_max: Optional[str] = None,
     ) -> EventsPage: ...
 
     @abstractmethod
@@ -111,7 +116,7 @@ class GoogleCalendarClient(CalendarClient):
         result = self._invoke(lambda: self._service.calendarList().list().execute(), "list_calendars")
         return result.get("items", [])
 
-    def list_events(self, calendar_id, sync_token=None, page_token=None) -> EventsPage:
+    def list_events(self, calendar_id, sync_token=None, page_token=None, time_min=None, time_max=None) -> EventsPage:
         params = {
             "calendarId": calendar_id,
             "singleEvents": True,
@@ -119,7 +124,13 @@ class GoogleCalendarClient(CalendarClient):
             "maxResults": 250,
         }
         if sync_token:
+            # timeMin/timeMax are rejected by the API when combined with syncToken.
             params["syncToken"] = sync_token
+        else:
+            if time_min:
+                params["timeMin"] = time_min
+            if time_max:
+                params["timeMax"] = time_max
         if page_token:
             params["pageToken"] = page_token
 

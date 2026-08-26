@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .db import Database
 from .errors import SyncTokenExpiredError
@@ -94,12 +94,14 @@ def _full_resync_due(db: Database, calendar_key: str, interval_hours: float) -> 
     return age_hours >= interval_hours
 
 
-def _fetch_all_events(client: CalendarClient, calendar_id: str, sync_token):
+def _fetch_all_events(client: CalendarClient, calendar_id: str, sync_token, *, time_min=None, time_max=None):
     items = []
     page_token = None
     next_sync_token = None
     while True:
-        page = client.list_events(calendar_id, sync_token=sync_token, page_token=page_token)
+        page = client.list_events(
+            calendar_id, sync_token=sync_token, page_token=page_token, time_min=time_min, time_max=time_max
+        )
         items.extend(page.items)
         page_token = page.next_page_token
         if page.next_sync_token:
@@ -109,8 +111,100 @@ def _fetch_all_events(client: CalendarClient, calendar_id: str, sync_token):
     return items, next_sync_token
 
 
-def sync_direction(
+def _sync_window(window_days: float) -> tuple[datetime, datetime]:
+    now = datetime.now(timezone.utc)
+    return now, now + timedelta(days=window_days)
+
+
+def _parse_bound(value: "dict | None") -> "datetime | None":
+    if not value:
+        return None
+    try:
+        if "dateTime" in value:
+            return datetime.fromisoformat(value["dateTime"])
+        if "date" in value:
+            return datetime.fromisoformat(value["date"]).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return None
+
+
+def _overlaps_window(start: "dict | None", end: "dict | None", window_start: datetime, window_end: datetime) -> bool:
+    """True if [start, end) overlaps [window_start, window_end]. Unparseable bounds fail open (kept)."""
+    start_dt, end_dt = _parse_bound(start), _parse_bound(end)
+    if start_dt is None or end_dt is None:
+        return True
+    return start_dt < window_end and end_dt > window_start
+
+
+def _event_in_window(event: dict, window_start: datetime, window_end: datetime) -> bool:
+    return _overlaps_window(event.get("start"), event.get("end"), window_start, window_end)
+
+
+def _signature_in_window(signature: str, window_start: datetime, window_end: datetime) -> bool:
+    try:
+        parsed = json.loads(signature)
+    except (TypeError, ValueError):
+        return False
+    return _overlaps_window(parsed.get("start"), parsed.get("end"), window_start, window_end)
+
+
+def _fetch_source_events(
     source_client: CalendarClient,
+    db: Database,
+    *,
+    source_calendar_id: str,
+    source_calendar_key: str,
+    full_resync_interval_hours: float,
+    sync_window_days: float,
+) -> tuple[list[dict], "str | None", bool, datetime, datetime]:
+    """Fetch one source calendar's changed events since the last pass (once per pass,
+    regardless of how many destination calendars it fans out to)."""
+    stored_token = db.get_sync_token(source_calendar_key)
+    force_full = stored_token is None or _full_resync_due(db, source_calendar_key, full_resync_interval_hours)
+    sync_token = None if force_full else stored_token
+    window_start, window_end = _sync_window(sync_window_days)
+
+    if force_full:
+        events, next_sync_token = _fetch_all_events(
+            source_client,
+            source_calendar_id,
+            None,
+            time_min=window_start.isoformat(),
+            time_max=window_end.isoformat(),
+        )
+    else:
+        try:
+            events, next_sync_token = _fetch_all_events(source_client, source_calendar_id, sync_token)
+        except SyncTokenExpiredError:
+            log_event(logger, "sync_token_expired", level="warning", calendar=source_calendar_key)
+            force_full = True
+            events, next_sync_token = _fetch_all_events(
+                source_client,
+                source_calendar_id,
+                None,
+                time_min=window_start.isoformat(),
+                time_max=window_end.isoformat(),
+            )
+        else:
+            # Google rejects timeMin/timeMax combined with syncToken, so an incremental
+            # fetch can't be time-bounded server-side — filter client-side instead.
+            # Cancellations always pass through: a source deletion must still clear an
+            # existing mirror even if the (now-gone) event would fall outside the window.
+            events = [
+                event
+                for event in events
+                if event.get("status") == "cancelled" or _event_in_window(event, window_start, window_end)
+            ]
+
+    # Never mirror a mirror: this is the core loop-prevention check.
+    events = [event for event in events if not is_mirror_event(event)]
+    return events, next_sync_token, force_full, window_start, window_end
+
+
+def propagate_to_destination(
+    events: list[dict],
+    force_full: bool,
     dest_client: CalendarClient,
     db: Database,
     *,
@@ -119,31 +213,15 @@ def sync_direction(
     source_calendar_key: str,
     dest_account: str,
     dest_calendar_id: str,
-    full_resync_interval_hours: float = 24.0,
+    window_start: datetime,
+    window_end: datetime,
     dry_run: bool = False,
 ) -> SyncStats:
-    """Mirror busy blocks from one calendar into another. Call twice for bidirectional sync."""
+    """Mirror one source calendar's busy blocks into one destination calendar."""
     stats = SyncStats()
-    stored_token = db.get_sync_token(source_calendar_key)
-    force_full = stored_token is None or _full_resync_due(db, source_calendar_key, full_resync_interval_hours)
-    sync_token = None if force_full else stored_token
-
-    try:
-        events, next_sync_token = _fetch_all_events(source_client, source_calendar_id, sync_token)
-    except SyncTokenExpiredError:
-        log_event(logger, "sync_token_expired", level="warning", calendar=source_calendar_key)
-        if not dry_run:
-            db.set_sync_token(source_calendar_key, None)
-        force_full = True
-        events, next_sync_token = _fetch_all_events(source_client, source_calendar_id, None)
-
     processed_ids: set[str] = set()
 
     for event in events:
-        if is_mirror_event(event):
-            # Never mirror a mirror: this is the core loop-prevention check.
-            continue
-
         event_id = event["id"]
         processed_ids.add(event_id)
         mapping = db.get_mapping(source_account, source_calendar_id, event_id, dest_account, dest_calendar_id)
@@ -154,7 +232,9 @@ def sync_direction(
                     dest_client.delete_event(dest_calendar_id, mapping["dest_event_id"])
                     db.mark_deleted(mapping["id"])
                 stats.deleted += 1
-                log_event(logger, "mirror_deleted", source=source_calendar_key, reason="source_cancelled")
+                log_event(
+                    logger, "mirror_deleted", source=source_calendar_key, dest=dest_account, reason="source_cancelled"
+                )
             continue
 
         if should_skip_event(event):
@@ -163,10 +243,16 @@ def sync_direction(
                     dest_client.delete_event(dest_calendar_id, mapping["dest_event_id"])
                     db.mark_deleted(mapping["id"])
                 stats.deleted += 1
-                log_event(logger, "mirror_deleted", source=source_calendar_key, reason="source_no_longer_blocking")
+                log_event(
+                    logger,
+                    "mirror_deleted",
+                    source=source_calendar_key,
+                    dest=dest_account,
+                    reason="source_no_longer_blocking",
+                )
             else:
                 stats.skipped += 1
-                log_event(logger, "event_skipped", source=source_calendar_key)
+                log_event(logger, "event_skipped", source=source_calendar_key, dest=dest_account)
             continue
 
         signature = event_signature(event)
@@ -206,66 +292,101 @@ def sync_direction(
             stats.unchanged += 1
 
     if force_full:
-        # A full listing reflects every currently-active source event, so any mapping
-        # not seen here is orphaned (its source was deleted while we had no valid token)
-        # or was manually tampered with on the destination — restore by deleting;
-        # the next pass (or this one, since it was just processed above) recreates it.
+        # A full listing reflects every currently-active source event *within the sync
+        # window*, so any mapping not seen here whose recorded event also falls in that
+        # window is orphaned (its source was deleted while we had no valid token, or it
+        # was manually tampered with on the destination) — restore by deleting; the next
+        # pass (or this one, since it was just processed above) recreates it. Mappings
+        # for events outside the window (already ended, or further out than we fetched)
+        # are left untouched — this fetch tells us nothing about their current status.
         for mapping in db.list_active_mappings_for_pair(
             source_account, source_calendar_id, dest_account, dest_calendar_id
         ):
-            if mapping["source_event_id"] not in processed_ids:
-                if not dry_run:
-                    dest_client.delete_event(dest_calendar_id, mapping["dest_event_id"])
-                    db.mark_deleted(mapping["id"])
-                stats.deleted += 1
-                log_event(logger, "mirror_deleted", source=source_calendar_key, reason="orphan_cleanup")
-        if not dry_run:
-            db.set_last_full_sync(source_calendar_key, datetime.now(timezone.utc).isoformat())
-
-    if not dry_run and next_sync_token:
-        db.set_sync_token(source_calendar_key, next_sync_token)
+            if mapping["source_event_id"] in processed_ids:
+                continue
+            if not _signature_in_window(mapping["source_signature"], window_start, window_end):
+                continue
+            if not dry_run:
+                dest_client.delete_event(dest_calendar_id, mapping["dest_event_id"])
+                db.mark_deleted(mapping["id"])
+            stats.deleted += 1
+            log_event(logger, "mirror_deleted", source=source_calendar_key, dest=dest_account, reason="orphan_cleanup")
 
     return stats
+
+
+def sync_all_pairs(
+    clients: dict[str, CalendarClient],
+    calendar_ids: dict[str, str],
+    db: Database,
+    *,
+    full_resync_interval_hours: float = 24.0,
+    sync_window_days: float = 14.0,
+    dry_run: bool = False,
+) -> dict[str, SyncStats]:
+    """Mirror busy blocks between every ordered pair of configured calendars.
+
+    Each calendar's events are fetched exactly once per pass and then fanned out
+    to every *other* configured calendar, so this scales to any number (2+) of
+    calendars without re-fetching the same source multiple times per pass.
+    """
+    accounts = list(calendar_ids)
+    pair_stats: dict[str, SyncStats] = {}
+
+    for source_account in accounts:
+        source_calendar_id = calendar_ids[source_account]
+        events, next_sync_token, force_full, window_start, window_end = _fetch_source_events(
+            clients[source_account],
+            db,
+            source_calendar_id=source_calendar_id,
+            source_calendar_key=source_account,
+            full_resync_interval_hours=full_resync_interval_hours,
+            sync_window_days=sync_window_days,
+        )
+
+        for dest_account in accounts:
+            if dest_account == source_account:
+                continue
+            pair_stats[f"{source_account}->{dest_account}"] = propagate_to_destination(
+                events,
+                force_full,
+                clients[dest_account],
+                db,
+                source_account=source_account,
+                source_calendar_id=source_calendar_id,
+                source_calendar_key=source_account,
+                dest_account=dest_account,
+                dest_calendar_id=calendar_ids[dest_account],
+                window_start=window_start,
+                window_end=window_end,
+                dry_run=dry_run,
+            )
+
+        if not dry_run:
+            if force_full:
+                db.set_last_full_sync(source_account, datetime.now(timezone.utc).isoformat())
+            if next_sync_token:
+                db.set_sync_token(source_account, next_sync_token)
+
+    return pair_stats
 
 
 def run_sync_pass(
     cfg,
     db: Database,
-    workspace_client: CalendarClient,
-    personal_client: CalendarClient,
+    clients: dict[str, CalendarClient],
     dry_run: bool = False,
 ):
-    log_event(logger, "sync_started", dry_run=dry_run)
+    log_event(logger, "sync_started", dry_run=dry_run, accounts=list(cfg.calendars))
 
-    stats_w2p = sync_direction(
-        workspace_client,
-        personal_client,
+    pair_stats = sync_all_pairs(
+        clients,
+        cfg.calendars,
         db,
-        source_account="workspace",
-        source_calendar_id=cfg.workspace_calendar_id,
-        source_calendar_key="workspace",
-        dest_account="personal",
-        dest_calendar_id=cfg.personal_calendar_id,
         full_resync_interval_hours=cfg.full_resync_interval_hours,
-        dry_run=dry_run,
-    )
-    stats_p2w = sync_direction(
-        personal_client,
-        workspace_client,
-        db,
-        source_account="personal",
-        source_calendar_id=cfg.personal_calendar_id,
-        source_calendar_key="personal",
-        dest_account="workspace",
-        dest_calendar_id=cfg.workspace_calendar_id,
-        full_resync_interval_hours=cfg.full_resync_interval_hours,
+        sync_window_days=cfg.sync_window_days,
         dry_run=dry_run,
     )
 
-    log_event(
-        logger,
-        "sync_completed",
-        workspace_to_personal=vars(stats_w2p),
-        personal_to_workspace=vars(stats_p2w),
-    )
-    return stats_w2p, stats_p2w
+    log_event(logger, "sync_completed", **{key: vars(stats) for key, stats in pair_stats.items()})
+    return pair_stats

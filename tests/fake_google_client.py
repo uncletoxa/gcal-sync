@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from gcal_sync.errors import SyncTokenExpiredError
 from gcal_sync.google_client import EventsPage
+
+
+def _bound(value: "dict | None") -> "datetime | None":
+    if not value:
+        return None
+    if "dateTime" in value:
+        return datetime.fromisoformat(value["dateTime"])
+    if "date" in value:
+        return datetime.fromisoformat(value["date"]).replace(tzinfo=timezone.utc)
+    return None
+
+
+def _in_range(event: dict, time_min: "str | None", time_max: "str | None") -> bool:
+    start, end = _bound(event.get("start")), _bound(event.get("end"))
+    if start is None or end is None:
+        return True
+    if time_max and start >= datetime.fromisoformat(time_max):
+        return False
+    if time_min and end <= datetime.fromisoformat(time_min):
+        return False
+    return True
 
 
 class FakeCalendarClient:
@@ -45,7 +67,7 @@ class FakeCalendarClient:
     def list_calendars(self):
         return [{"id": cal_id, "summary": cal_id} for cal_id in self._calendars]
 
-    def list_events(self, calendar_id, sync_token=None, page_token=None) -> EventsPage:
+    def list_events(self, calendar_id, sync_token=None, page_token=None, time_min=None, time_max=None) -> EventsPage:
         cal = self._cal(calendar_id)
         if sync_token is not None:
             if sync_token in cal["expired_tokens"]:
@@ -54,7 +76,11 @@ class FakeCalendarClient:
             changed_ids = sorted({eid for rev, eid in cal["changes"] if rev > since_rev})
             items = [cal["events"][eid] for eid in changed_ids if eid in cal["events"]]
         else:
-            items = [e for e in cal["events"].values() if e.get("status") != "cancelled"]
+            items = [
+                e
+                for e in cal["events"].values()
+                if e.get("status") != "cancelled" and _in_range(e, time_min, time_max)
+            ]
         return EventsPage(items=items, next_page_token=None, next_sync_token=str(cal["revision"]))
 
     def insert_event(self, calendar_id, body) -> dict:

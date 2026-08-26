@@ -1,21 +1,26 @@
 # gcal-sync
 
-Self-hosted, bidirectional **availability** synchronization between a Google
-Workspace calendar and a personal Google calendar.
+Self-hosted, bidirectional **availability** synchronization across two or
+more Google calendars (e.g. a Workspace calendar and a personal calendar —
+or any number of accounts/calendars beyond that).
 
 It does **not** copy event titles, descriptions, attendees, locations, or
-conferencing links. It only creates private "Busy" placeholder events on the
-other calendar so both calendars accurately reflect your availability.
+conferencing links. It only creates private "Busy" placeholder events on
+every other calendar so all configured calendars accurately reflect your
+combined availability.
 
 ## What it does
 
-* Polls both calendars on an interval (default: every 2 minutes) using
-  Google Calendar's incremental sync (`syncToken`), so it doesn't re-download
-  the whole calendar every pass.
-* For every real event on the Workspace calendar, ensures a private,
-  content-free "Busy" block exists at the same time on the personal calendar
-  — and vice versa.
-* Moves/resizes/deletes on the source event are propagated to its mirror.
+* Polls all configured calendars on an interval (default: every 2 minutes)
+  using Google Calendar's incremental sync (`syncToken`), so it doesn't
+  re-download the whole calendar every pass. Each calendar's events are
+  fetched exactly once per pass no matter how many other calendars it's
+  synced against.
+* For every real event on any configured calendar, ensures a private,
+  content-free "Busy" block exists at the same time on **every other**
+  configured calendar. With N calendars, that's an N-way fan-out (each
+  calendar mirrors busy blocks from all N-1 others), not just a single pair.
+* Moves/resizes/deletes on the source event are propagated to all of its mirrors.
 * Recurring events and all-day events are handled correctly (Google expands
   recurring events into individual instances for us; each instance is
   mirrored/cancelled independently).
@@ -48,25 +53,44 @@ deploy/             # Dockerfile / docker-compose (works with Podman) + a system
 ## 1. Google Cloud project / API setup
 
 1. Go to the Google Cloud Console and create a project (or reuse one you
-   control) — you'll do this **twice** conceptually, but only need **one**
-   OAuth client: the same Desktop OAuth client is used to authorize both
-   your Workspace account and your personal account (they just produce two
-   separate refresh tokens).
+   control). You only need **one** OAuth client: the same Desktop OAuth
+   client is used to authorize every account you want to sync (each account
+   just produces its own separate refresh token).
 2. Enable the **Google Calendar API** for the project
    (APIs & Services → Library → "Google Calendar API" → Enable).
 3. Configure the **OAuth consent screen**:
    * User type: "Internal" if the project lives under your Workspace org and
-     you only need the Workspace account to authorize (Internal apps don't
-     need Google's verification review). Otherwise choose "External" and add
-     both Google accounts (Workspace + personal) as **test users** — apps in
-     "Testing" mode work indefinitely for test users without verification.
+     **every** account you're syncing belongs to that same org (Internal apps
+     don't need Google's verification review, but Google will flat-out refuse
+     to authorize any account outside that org — no test-user list can work
+     around this). Otherwise choose "External" and add every Google account
+     you plan to sync as a **test user** — apps in "Testing" mode work
+     indefinitely for test users without verification.
    * Scopes: you don't need to add scopes on the consent screen itself for a
      Desktop app / testing setup; the app requests them directly (see below).
+   * **Syncing accounts across multiple orgs/projects?** gcal-sync only takes
+     one `GOOGLE_CLIENT_SECRETS_FILE` for every account (see step 2 below), so
+     if you already have OAuth clients in several Cloud projects (e.g. two
+     separate Workspace orgs plus a personal project), you can't just pick any
+     of them — an Internal client can only authorize its own org's accounts.
+     Use (or create) a client whose consent screen is **External**, and add
+     every account you're syncing (across all orgs, plus personal) as test
+     users on that one project. A project created under a personal Gmail
+     account is always External by default (Internal isn't offered outside a
+     Workspace org), which makes it a natural choice for this case.
 
 ## 2. OAuth client setup
 
 1. APIs & Services → Credentials → Create Credentials → OAuth client ID.
-2. Application type: **Desktop app**.
+2. Application type: **Desktop app** — this is required, not just a
+   preference. `gcal-sync auth` (see `src/gcal_sync/auth.py`) runs Google's
+   *loopback* OAuth flow: it starts a temporary local web server on a random
+   free port and has Google redirect back to `http://localhost:<that port>`
+   after you approve. Google only allows redirecting to arbitrary localhost
+   ports like this for **Desktop app** (installed app) clients. A **Web
+   application** client would require pre-registering one fixed redirect URI
+   in Cloud Console, which doesn't work with a randomly-chosen port each run
+   — the flow would fail at the redirect step.
 3. Download the resulting JSON file.
 4. Save it in this repo's `data/` directory (already gitignored), e.g. as
    `data/client_secret.json`, or point `GOOGLE_CLIENT_SECRETS_FILE` in `.env`
@@ -94,66 +118,75 @@ Edit `.env` (see `.env.example` for the full list):
 GOOGLE_CLIENT_SECRETS_FILE=data/client_secret.json
 TOKEN_DIR=data
 DB_PATH=data/state.sqlite3
-WORKSPACE_CALENDAR_ID=
-PERSONAL_CALENDAR_ID=
+CALENDARS=
 POLL_INTERVAL_SECONDS=120
 FULL_RESYNC_INTERVAL_HOURS=24
+SYNC_WINDOW_DAYS=14
 LOG_LEVEL=INFO
 ```
 
-`WORKSPACE_CALENDAR_ID` / `PERSONAL_CALENDAR_ID` are filled in after step 6
-below (calendar discovery). Leave them blank until then — `auth` and
-`calendars` don't need them.
+`CALENDARS` is a comma-separated list of `<account>:<calendar_id>` pairs —
+one entry per calendar you want kept in sync. Pick any account names you
+like (e.g. `workspace`, `personal`, `team`); they just need to match the
+`--account` value you use in the `auth`/`calendars` commands below. At least
+2 entries are required; any number (3, 4, ...) is supported. Leave it blank
+until step 6 below (calendar discovery) — `auth` and `calendars` don't need
+it.
 
-## 4. Authorize the Workspace account
+## 4. Authorize each account
+
+For every account you listed (or plan to list) in `CALENDARS`, run:
+
+```bash
+uv run gcal-sync auth --account <name>
+```
+
+e.g. for a 3-calendar setup:
 
 ```bash
 uv run gcal-sync auth --account workspace
+uv run gcal-sync auth --account personal
+uv run gcal-sync auth --account team
 ```
 
-This opens a browser (loopback redirect to `http://localhost:<random-port>`,
-no public callback needed) — sign in with your **Workspace** account and
-approve. The resulting refresh token is written to `data/token_workspace.json`
-with `0600` permissions.
+Each run opens a browser (loopback redirect to `http://localhost:<random-port>`,
+no public callback needed) — sign in with the corresponding Google account
+and approve. The resulting refresh token is written to
+`data/token_<name>.json` with `0600` permissions.
 
 If you're on a headless machine without a local browser, use
 `--no-browser` and open the printed URL yourself (e.g. via an SSH tunnel:
 `ssh -L <port>:localhost:<port> this-machine`).
 
-## 5. Authorize the personal account
-
-```bash
-uv run gcal-sync auth --account personal
-```
-
-Same flow — sign in with your **personal** Google account this time. Stored
-as `data/token_personal.json`.
-
 You will not need to log in again after this; `gcal-sync` refreshes access
 tokens automatically using the stored refresh tokens.
 
-## 6. Find calendar IDs
+## 5. Find calendar IDs
 
 ```bash
-uv run gcal-sync calendars --account workspace
-uv run gcal-sync calendars --account personal
+uv run gcal-sync calendars --account <name>
 ```
 
-Each line is `<calendar id>  <summary>  <PRIMARY if applicable>`. Usually
-you want the `PRIMARY` calendar for each account — its ID is the account's
-email address. Put the IDs into `.env` as `WORKSPACE_CALENDAR_ID` /
-`PERSONAL_CALENDAR_ID`.
+Run once per account. Each line is `<calendar id>  <summary>  <PRIMARY if
+applicable>`. Usually you want the `PRIMARY` calendar for each account — its
+ID is the account's email address. Put the results into `.env` as
+`CALENDARS`, e.g.:
 
-## 7. First dry run
+```
+CALENDARS=workspace:you@company.com,personal:you@gmail.com,team:abc123@group.calendar.google.com
+```
+
+## 6. First dry run
 
 ```bash
 uv run gcal-sync sync --dry-run
 ```
 
-This performs one real read-only pass — it reads both calendars for real but
-does not create/update/delete anything or persist sync tokens — and logs
-what it *would* do (`mirror_created` / `mirror_updated` / `mirror_deleted` /
-`event_skipped`). Check the output looks sane, then run it for real:
+This performs one real read-only pass — it reads every configured calendar
+for real but does not create/update/delete anything or persist sync tokens —
+and logs what it *would* do (`mirror_created` / `mirror_updated` /
+`mirror_deleted` / `event_skipped`). Check the output looks sane, then run it
+for real:
 
 ```bash
 uv run gcal-sync sync
@@ -166,7 +199,7 @@ just to sanity check things). `start` runs the same logic continuously:
 uv run gcal-sync start
 ```
 
-## 8. Run continuously
+## 7. Run continuously
 
 ### Option A — Podman (recommended, since it's available on this machine)
 
@@ -197,17 +230,33 @@ systemctl --user enable --now gcal-sync
 
 | Command | Purpose |
 |---|---|
-| `gcal-sync auth --account workspace\|personal [--no-browser]` | One-time OAuth authorization for an account |
-| `gcal-sync calendars --account workspace\|personal` | List calendars visible to an authorized account (to find IDs) |
-| `gcal-sync sync [--dry-run]` | Run a single synchronization pass and exit |
+| `gcal-sync auth --account <name> [--no-browser]` | One-time OAuth authorization for an account (`<name>` must match a key in `CALENDARS`) |
+| `gcal-sync calendars --account <name>` | List calendars visible to an authorized account (to find IDs) |
+| `gcal-sync sync [--dry-run]` | Run a single synchronization pass across all configured calendars and exit |
 | `gcal-sync start [--dry-run]` | Run continuously, polling every `POLL_INTERVAL_SECONDS` |
 
 ## Sync behavior notes
 
+* **Sync window**: only events starting or ending within `[now, now +
+  SYNC_WINDOW_DAYS]` (default 14 days) are mirrored. A full resync queries
+  Google directly with that range. An incremental (sync-token) pass can't be
+  time-bounded server-side — Google rejects combining a sync token with
+  `timeMin`/`timeMax` — so out-of-window events are filtered out client-side
+  instead; cancellations always pass through so a deleted source event still
+  clears its mirror. Once a mirrored event's window has passed, its mirror is
+  *not* proactively deleted — cleanup only happens if the source event itself
+  is cancelled or becomes non-blocking.
+* **N-way fan-out**: with more than 2 calendars configured, every calendar
+  is synced against every other one (`accounts * (accounts - 1)` directional
+  pairs per pass). A busy block on calendar A is mirrored onto B, C, D, ...
+  independently. Each source calendar's events are still only fetched once
+  per pass — the fan-out only affects how many destinations that one fetch
+  is applied to.
 * **Loop prevention**: every mirror event is created with
   `extendedProperties.private.gcalSyncMirror = "true"` plus source
   identifiers. Any event carrying that flag is skipped entirely when
-  scanning for *source* events — so a mirror is never mirrored back.
+  scanning for *source* events — so a mirror is never mirrored back, even
+  across 3+ calendars (a mirror on calendar B is never re-mirrored onto C).
 * **Idempotency**: mirrors are keyed by `(source account, source calendar,
   source event id, dest account, dest calendar)` in SQLite. Re-running sync
   never creates duplicates; it only creates/patches/deletes when the stored
@@ -258,8 +307,11 @@ automatic OAuth token refresh.
   in `.env` points at the JSON you downloaded from Cloud Console.
 * **HTTP 403 `accessNotConfigured`** — the Calendar API isn't enabled on the
   Cloud project backing your OAuth client.
-* **Missing configuration errors on `sync`/`start`** — `WORKSPACE_CALENDAR_ID`
-  / `PERSONAL_CALENDAR_ID` must be set in `.env` (see step 6 above).
+* **Missing configuration errors on `sync`/`start`** — `CALENDARS` must be
+  set in `.env` with at least 2 `<account>:<calendar_id>` entries (see step
+  3/5 above).
+* **`Invalid CALENDARS entry`** — each entry must be `<account>:<calendar_id>`,
+  comma-separated between entries; check for stray commas or missing colons.
 * Structured JSON logs go to stdout; grep for `"event": "authentication_error"`
   or `"event": "api_error"` to find failures. Logs never contain tokens,
   secrets, or original event titles/descriptions/attendees.
@@ -270,7 +322,7 @@ All persistent state lives under `data/` (gitignored):
 
 * `data/client_secret.json` — your OAuth client (not a secret you generated,
   but treat it as sensitive)
-* `data/token_workspace.json`, `data/token_personal.json` — refresh tokens
+* `data/token_<account>.json` (one per account in `CALENDARS`) — refresh tokens
 * `data/state.sqlite3` (+ `-wal`/`-shm` while running) — sync tokens and
   event mappings
 
@@ -280,8 +332,8 @@ again — the service will resume incremental sync from the stored tokens (or
 fall back to a full resync if the stored SQLite state is older/missing).
 
 If you lose `data/state.sqlite3` but keep the tokens, that's safe too: the
-next run has no sync tokens, so it performs a full resync of both calendars
-and rebuilds the mapping table from scratch (it will not duplicate mirrors
+next run has no sync tokens, so it performs a full resync of every configured
+calendar and rebuilds the mapping table from scratch (it will not duplicate mirrors
 across a full rebuild since it's still matching by source event ID — it
 simply has no memory of previously-created mirrors, so in that specific
 scenario it may create a second round of mirrors for events whose original
