@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/anton/Work/gcal-sync
-ExecStart=/usr/bin/env uv run gcal-sync start
+WorkingDirectory=%h/gcal-sync
+ExecStart=%h/.local/bin/uv run gcal-sync start
 Restart=on-failure
 RestartSec=10
 

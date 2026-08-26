@@ -217,14 +217,26 @@ To stop: `podman compose -f deploy/docker-compose.yml down` (data persists in `.
 
 ### Option B — systemd (no containers)
 
-See `deploy/gcal-sync.service` for a unit that runs `uv run gcal-sync start`
-directly on the host. Copy/adapt it into `~/.config/systemd/user/` (or
-`/etc/systemd/system/` for a system unit), then:
+`deploy/gcal-sync.service` runs `uv run gcal-sync start` directly on the
+host. It assumes the checkout lives at `~/gcal-sync` and that `uv` is
+installed at `~/.local/bin/uv` (the default for `uv`'s own installer) —
+edit `WorkingDirectory`/`ExecStart` if either differs on your machine.
+It deliberately doesn't rely on `uv` being on `$PATH`, since systemd user
+services start with a minimal environment and don't source your shell rc
+files.
 
 ```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/gcal-sync.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now gcal-sync
 ```
+
+For a system-wide unit instead (`/etc/systemd/system/`), replace `%h` with
+the absolute paths for whichever user should run it.
+
+If this is a headless/always-on machine, make sure the service keeps
+running after you log out or reboot: `loginctl enable-linger $USER`.
 
 ## CLI reference
 
