@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gcal-sync</title>
+<style>
+  body { max-width: 40rem; margin: 3rem auto; padding: 0 1rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #1a1a1a; }
+  h1 { margin-bottom: 0.25rem; }
+  .tagline { color: #555; margin-top: 0; }
+  code { background: #f2f2f2; padding: 0.1em 0.4em; border-radius: 3px; font-size: 0.9em; }
+  footer { margin-top: 3rem; font-size: 0.85em; color: #777; }
+  a { color: #0b5fff; }
+</style>
+</head>
+<body>
+  <h1>gcal-sync</h1>
+  <p class="tagline">Self-hosted, open-source <strong>availability</strong> sync across two or more Google Calendars.</p>
+
+  <p>
+    gcal-sync keeps multiple Google Calendars showing accurate combined
+    availability. For every real event on any configured calendar, it
+    creates a private, content-free &ldquo;Busy&rdquo; placeholder on every
+    other configured calendar. It never copies event titles, descriptions,
+    attendees, locations, or conferencing links &mdash; only the fact that
+    the time is blocked.
+  </p>
+
+  <p>
+    There is no hosted version of this service. You run your own instance,
+    using your own Google Cloud project and your own OAuth credentials.
+    Your calendar data is read and written directly between your own
+    deployment and Google's servers &mdash; it never passes through the
+    project maintainer or any third party.
+  </p>
+
+  <ul>
+    <li><a href="https://github.com/uncletoxa/gcal-sync">Source code &amp; setup instructions</a></li>
+    <li><a href="privacy.html">Privacy Policy</a></li>
+  </ul>
+
+  <footer>
+    gcal-sync is open source software. See the repository for license and
+    contribution details.
+  </footer>
+</body>
+</html>

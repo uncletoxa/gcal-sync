@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — gcal-sync</title>
+<style>
+  body { max-width: 40rem; margin: 3rem auto; padding: 0 1rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #1a1a1a; }
+  h1 { margin-bottom: 0.25rem; }
+  .effective { color: #555; margin-top: 0; font-size: 0.9em; }
+  code { background: #f2f2f2; padding: 0.1em 0.4em; border-radius: 3px; font-size: 0.9em; }
+  footer { margin-top: 3rem; font-size: 0.85em; color: #777; }
+  a { color: #0b5fff; }
+</style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="effective">Effective 2026-08-30</p>
+
+  <p>
+    gcal-sync is open-source software that you download and run yourself,
+    on infrastructure you control. The project maintainer does not operate
+    a hosted version of this service and never receives, stores, or has
+    access to your Google account data. This policy describes how the
+    software itself handles data when you run your own instance of it.
+  </p>
+
+  <h2>Google data this software accesses</h2>
+  <p>gcal-sync requests two narrow Google Calendar API scopes and nothing else:</p>
+  <ul>
+    <li>
+      <code>calendar.events</code> &mdash; to read events on the calendars
+      you configure, and to create, update, or delete the private
+      &ldquo;Busy&rdquo; placeholder events it uses to mirror availability
+      across them.
+    </li>
+    <li>
+      <code>calendar.calendarlist.readonly</code> &mdash; to list the
+      calendars visible to an authorized account, so you can pick which
+      calendar ID to sync (used only by the <code>calendars</code> command).
+    </li>
+  </ul>
+  <p>
+    gcal-sync never requests access to Gmail, Drive, Contacts, or any other
+    Google product.
+  </p>
+
+  <h2>What gets copied between calendars</h2>
+  <p>
+    Only the start/end time, busy/free status, and recurrence pattern of a
+    source event are copied into a placeholder mirror event on the other
+    calendars. Titles, descriptions, attendees, locations, and conferencing
+    links are never copied, read into logs, or stored anywhere. Events
+    marked &ldquo;Free&rdquo; are ignored entirely.
+  </p>
+
+  <h2>Where data is stored</h2>
+  <p>
+    Everything gcal-sync needs to operate &mdash; OAuth tokens and a record
+    of which source events map to which mirror events &mdash; is stored
+    locally on the machine you deploy it on (as local files and a local
+    SQLite database). None of it is transmitted to the project maintainer,
+    to analytics providers, or to any other third party.
+  </p>
+
+  <h2>Data sharing</h2>
+  <p>
+    gcal-sync makes outbound HTTPS requests only to Google's Calendar API.
+    It does not include analytics, tracking, advertising, or any other
+    third-party integration.
+  </p>
+
+  <h2>Data retention and deletion</h2>
+  <p>
+    Data is retained only for as long as you, the operator, keep it.
+    Deleting the local <code>data/</code> directory removes all stored
+    tokens and sync state. You can revoke gcal-sync's access to your Google
+    account at any time from
+    <a href="https://myaccount.google.com/permissions">Google Account &rarr; Security &rarr; Third-party access</a>.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions about this software can be raised via
+    <a href="https://github.com/uncletoxa/gcal-sync/issues">GitHub Issues</a>
+    on the source repository.
+  </p>
+
+  <p><a href="index.html">&larr; Back</a></p>
+</body>
+</html>
