@@ -1,0 +1,7 @@
+# Replace with your actual domain (must match WEB_BASE_URL in .env and the redirect
+# URI configured on the Web application OAuth client in Cloud Console). Caddy obtains
+# and renews a Let's Encrypt certificate automatically the first time it's requested —
+# just point the domain's A/AAAA record at this host beforehand.
+gcal.yourdomain.com {
+	reverse_proxy web:8000
+}

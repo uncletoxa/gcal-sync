@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}gcal-sync{% endblock %}
+{% block body %}
+  <h1>gcal-sync</h1>
+  <p>Keep your own calendars showing accurate combined availability.</p>
+  <p class="muted">
+    Connect two or more of your own Google Calendars (e.g. work + personal). We'll create
+    private, content-free "Busy" placeholders so each one reflects your combined
+    availability — never your event titles, descriptions, or attendees. Your calendars are
+    only ever synced against each other, never against anyone else's.
+  </p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <p><a class="btn btn-primary" href="{{ url_for('login') }}">Sign in with Google</a></p>
+{% endblock %}

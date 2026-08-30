@@ -41,13 +41,17 @@ created.
 ```
 src/gcal_sync/
   config.py        # env-based configuration
-  auth.py           # OAuth loopback flow + credential storage/refresh
+  auth.py           # OAuth loopback (Desktop app) flow + file-based credential storage
+  web_auth.py       # OAuth Web-application flow + DB-backed credential storage for web sign-ups
+  crypto.py         # Fernet encrypt/decrypt for credentials stored in the DB
   google_client.py  # Google Calendar API client (retryable) + CalendarClient interface
-  db.py             # SQLite persistence: sync tokens + event mappings
+  db.py             # SQLite persistence: sync tokens, event mappings, tenants, connected accounts
   sync_engine.py    # core bidirectional sync logic (pure, testable without the API)
-  cli.py            # `gcal-sync` command group
+  cli.py            # `gcal-sync` command group (auth, calendars, sync, start, web)
+  web/              # Flask app: self-serve sign-up/dashboard for multi-tenant use
 tests/              # pytest suite; sync engine is tested against a fake in-memory client
-deploy/             # Dockerfile / docker-compose (works with Podman) + a systemd unit example
+deploy/             # Dockerfile / docker-compose (works with Podman), a systemd unit example,
+                    # and a Caddyfile for the optional web app's reverse proxy
 ```
 
 ## 1. Google Cloud project / API setup
@@ -244,8 +248,91 @@ running after you log out or reboot: `loginctl enable-linger $USER`.
 |---|---|
 | `gcal-sync auth --account <name> [--no-browser]` | One-time OAuth authorization for an account (`<name>` must match a key in `CALENDARS`) |
 | `gcal-sync calendars --account <name>` | List calendars visible to an authorized account (to find IDs) |
-| `gcal-sync sync [--dry-run]` | Run a single synchronization pass across all configured calendars and exit |
+| `gcal-sync sync [--dry-run]` | Run a single synchronization pass — the legacy `CALENDARS` group (if configured) plus every web-signed-up tenant's own calendars — and exit |
 | `gcal-sync start [--dry-run]` | Run continuously, polling every `POLL_INTERVAL_SECONDS` |
+| `gcal-sync web [--host] [--port] [--debug]` | Run the web sign-up app (dev server; use gunicorn in production — see "Web sign-up for a team" below) |
+
+## Web sign-up for a team
+
+For letting other people connect their own calendars self-serve (rather than you
+running `gcal-sync auth` on their behalf), gcal-sync has a small Flask app where
+someone signs in with Google and connects two or more of *their own* calendars.
+Availability only ever syncs **within one person's own connected calendars** — there
+is no cross-person mesh; person A's calendars are never compared against person B's.
+
+This is entirely additive: your existing `CALENDARS`/`gcal-sync auth` setup (if any)
+keeps working unchanged and continues to run alongside web-signed-up tenants in the
+same `sync`/`start` process.
+
+### Why this needs a second OAuth client
+
+`gcal-sync auth` uses Google's *loopback* flow (a Desktop app OAuth client, redirecting
+to a random `localhost` port) — that only works for a human running a CLI on the same
+machine as their browser. A hosted sign-up page needs Google to redirect back to your
+server instead, which requires a **Web application** OAuth client with one fixed,
+pre-registered redirect URI. You need both client types configured in the same Cloud
+project; they're independent and don't conflict.
+
+1. Cloud Console → APIs & Services → Credentials → Create Credentials → OAuth client ID.
+2. Application type: **Web application**.
+3. Authorized redirect URI: `https://<your-domain>/oauth/callback` — must match
+   `WEB_BASE_URL` exactly (scheme + host, no trailing slash on the base).
+4. Download the JSON, save it as e.g. `data/web_client_secret.json`, and point
+   `GOOGLE_WEB_CLIENT_SECRETS_FILE` at it.
+5. On the OAuth consent screen (Branding page), fill in App name / support email /
+   developer contact / home page / privacy policy — required once you have more than a
+   handful of sign-ups, see "Publishing to production" below.
+
+### Configuration
+
+Set in `.env` (see `.env.example` for the full block):
+
+```
+GOOGLE_WEB_CLIENT_SECRETS_FILE=data/web_client_secret.json
+WEB_BASE_URL=https://gcal.yourdomain.com
+WEB_SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
+TOKEN_ENCRYPTION_KEY=<python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
+```
+
+Web-connected users' OAuth tokens are stored as encrypted rows in `data/state.sqlite3`
+(unlike the CLI flow's plaintext-but-0600 `data/token_<name>.json` files) — a shared DB
+holding several people's tokens is a bigger blast radius than one file per person, so
+they're encrypted at rest with `TOKEN_ENCRYPTION_KEY`. Back that key up somewhere
+separate from the DB itself; losing it makes those rows undecryptable (CLI-flow tokens
+in `data/token_*.json` are unaffected either way).
+
+### Running it
+
+Development:
+
+```bash
+uv run gcal-sync web --debug
+```
+
+Production (behind a reverse proxy that terminates TLS): see `deploy/docker-compose.yml`,
+which adds a `web` service (gunicorn) and a `caddy` service for automatic HTTPS — point
+your domain's DNS at the host, edit `deploy/Caddyfile` with your actual domain, then:
+
+```bash
+podman compose -f deploy/docker-compose.yml up -d
+```
+
+The poller (`gcal-sync` service, `start` command) picks up newly-connected tenants
+automatically on its next pass — no restart needed.
+
+### Publishing to production (avoiding the 7-day token expiry)
+
+While the OAuth consent screen is in **Testing** status, every grant — including your
+team's — expires 7 days after consent, and only up to 100 manually-added test users can
+sign in at all. For a real rollout, flip the consent screen to **In production** (Cloud
+Console → OAuth consent screen / Audience). This does **not** require Google's full
+verification review for a small internal rollout — it just requires the Branding page
+to be complete (app name, support email, developer contact, home page, privacy policy).
+Users will see a one-time "Google hasn't verified this app → Advanced → Go to
+gcal-sync" click during sign-in unless you complete full verification, but grants no
+longer expire on a 7-day cycle. See this project's own `docs/index.html` /
+`docs/privacy.html` (served via GitHub Pages) as a minimal example of the home
+page / privacy policy links Google requires.
 
 ## Sync behavior notes
 
@@ -263,7 +350,9 @@ running after you log out or reboot: `loginctl enable-linger $USER`.
   pairs per pass). A busy block on calendar A is mirrored onto B, C, D, ...
   independently. Each source calendar's events are still only fetched once
   per pass — the fan-out only affects how many destinations that one fetch
-  is applied to.
+  is applied to. This fan-out is scoped to one sync group at a time: the
+  legacy `CALENDARS` group, or (independently) one web-signed-up tenant's own
+  connected calendars — never across groups/tenants.
 * **Loop prevention**: every mirror event is created with
   `extendedProperties.private.gcalSyncMirror = "true"` plus source
   identifiers. Any event carrying that flag is skipped entirely when
@@ -376,4 +465,12 @@ one thing worth doing here).
 * Mirror events never include attendees, descriptions, locations, or
   conferencing info, and are inserted/patched/deleted with
   `sendUpdates="none"` so no one is ever notified about them.
-* No HTTP server is started; this is a polling-only, outbound-only service.
+* The core sync poller (`gcal-sync start`/`sync`) starts no HTTP server; it's
+  polling-only and outbound-only. The optional `gcal-sync web` app (see "Web
+  sign-up for a team") does listen on a port, since a hosted OAuth sign-up
+  flow requires one — only run it if you're actually offering self-serve
+  sign-up.
+* Web-signed-up users' OAuth tokens are stored encrypted (Fernet,
+  `TOKEN_ENCRYPTION_KEY`) as rows in `data/state.sqlite3`, since a shared DB
+  holding multiple people's tokens is a bigger blast radius than the CLI
+  flow's one-token-file-per-account model.

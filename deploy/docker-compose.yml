@@ -10,3 +10,39 @@ services:
     volumes:
       - ../data:/app/data
     command: ["start"]
+
+  # Self-serve web sign-up for team members to connect their own calendars.
+  # Only needed if you're offering gcal-sync to other people via WEB_BASE_URL —
+  # the gcal-sync service above works standalone without this.
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: gcal-sync-web
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    entrypoint: []
+    command: ["gunicorn", "--factory", "-w", "2", "-b", "0.0.0.0:8000", "gcal_sync.web.app:create_app"]
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: gcal-sync-caddy
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

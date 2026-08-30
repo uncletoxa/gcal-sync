@@ -16,6 +16,12 @@ class Config:
     full_resync_interval_hours: float
     sync_window_days: float
     log_level: str
+    # Web sign-up (multi-tenant) settings — optional, only needed to run `gcal-sync web`
+    # or to have the poller pick up web-connected tenants.
+    google_web_client_secrets_file: str = "data/web_client_secret.json"
+    web_base_url: str = ""
+    web_secret_key: str = ""
+    token_encryption_key: str = ""
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:
@@ -59,4 +65,10 @@ def load_config(require_calendars: bool = True) -> Config:
         full_resync_interval_hours=float(os.getenv("FULL_RESYNC_INTERVAL_HOURS", "24")),
         sync_window_days=float(os.getenv("SYNC_WINDOW_DAYS", "14")),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        google_web_client_secrets_file=os.getenv(
+            "GOOGLE_WEB_CLIENT_SECRETS_FILE", "data/web_client_secret.json"
+        ),
+        web_base_url=os.getenv("WEB_BASE_URL", ""),
+        web_secret_key=os.getenv("WEB_SECRET_KEY", ""),
+        token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY", ""),
     )

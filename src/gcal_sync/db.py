@@ -26,6 +26,24 @@ CREATE TABLE IF NOT EXISTS event_mappings (
     updated_at TEXT NOT NULL,
     UNIQUE(source_account, source_calendar_id, source_event_id, dest_account, dest_calendar_id)
 );
+
+CREATE TABLE IF NOT EXISTS tenants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS connected_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+    account_label TEXT NOT NULL,
+    google_email TEXT NOT NULL,
+    calendar_id TEXT NOT NULL,
+    credentials_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id, account_label)
+);
 """
 
 
@@ -155,3 +173,72 @@ class Database:
             """,
             (source_account, source_calendar_id, dest_account, dest_calendar_id),
         ).fetchall()
+
+    # -- tenants (web sign-up) -------------------------------------------
+    def get_or_create_tenant(self, email: str) -> sqlite3.Row:
+        """Look up a tenant by their sign-in Google account email, creating one if needed."""
+        row = self._conn.execute("SELECT * FROM tenants WHERE email = ?", (email,)).fetchone()
+        if row is not None:
+            return row
+        self._conn.execute(
+            "INSERT INTO tenants (email, created_at) VALUES (?, ?)", (email, _now())
+        )
+        self._conn.commit()
+        return self._conn.execute("SELECT * FROM tenants WHERE email = ?", (email,)).fetchone()
+
+    def get_tenant(self, tenant_id: int) -> Optional[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM tenants WHERE id = ?", (tenant_id,)
+        ).fetchone()
+
+    # -- connected accounts (web sign-up) ---------------------------------
+    def upsert_connected_account(
+        self,
+        *,
+        tenant_id: int,
+        account_label: str,
+        google_email: str,
+        calendar_id: str,
+        credentials_json: str,
+    ) -> None:
+        now = _now()
+        self._conn.execute(
+            """
+            INSERT INTO connected_accounts (
+                tenant_id, account_label, google_email, calendar_id,
+                credentials_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, account_label) DO UPDATE SET
+                google_email = excluded.google_email,
+                calendar_id = excluded.calendar_id,
+                credentials_json = excluded.credentials_json,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, account_label, google_email, calendar_id, credentials_json, now, now),
+        )
+        self._conn.commit()
+
+    def update_connected_account_credentials(self, account_id: int, credentials_json: str) -> None:
+        self._conn.execute(
+            "UPDATE connected_accounts SET credentials_json = ?, updated_at = ? WHERE id = ?",
+            (credentials_json, _now(), account_id),
+        )
+        self._conn.commit()
+
+    def list_connected_accounts(self, tenant_id: int) -> list[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM connected_accounts WHERE tenant_id = ? ORDER BY created_at",
+            (tenant_id,),
+        ).fetchall()
+
+    def delete_connected_account(self, tenant_id: int, account_id: int) -> None:
+        self._conn.execute(
+            "DELETE FROM connected_accounts WHERE id = ? AND tenant_id = ?",
+            (account_id, tenant_id),
+        )
+        self._conn.commit()
+
+    def list_tenants_with_accounts(self) -> list[tuple[sqlite3.Row, list[sqlite3.Row]]]:
+        """All tenants paired with their connected accounts, for the sync poller."""
+        tenants = self._conn.execute("SELECT * FROM tenants ORDER BY id").fetchall()
+        return [(tenant, self.list_connected_accounts(tenant["id"])) for tenant in tenants]

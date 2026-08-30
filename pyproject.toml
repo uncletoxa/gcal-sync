@@ -11,6 +11,13 @@ dependencies = [
     "google-auth-httplib2>=0.2.0",
     "python-dotenv>=1.0.0",
     "click>=8.1.0",
+    "flask>=3.0.0",
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+web = [
+    "gunicorn>=22.0.0",
 ]
 
 [project.scripts]
