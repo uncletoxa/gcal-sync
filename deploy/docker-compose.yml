@@ -25,7 +25,7 @@ services:
     volumes:
       - ../data:/app/data
     entrypoint: []
-    command: ["gunicorn", "--factory", "-w", "2", "-b", "0.0.0.0:8000", "gcal_sync.web.app:create_app"]
+    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "gcal_sync.web.app:create_app()"]
     expose:
       - "8000"
 
