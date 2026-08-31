@@ -46,6 +46,10 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         session["oauth_state"] = state
         return redirect(url)
 
+    @app.get("/privacy")
+    def privacy():
+        return render_template("privacy.html")
+
     @app.get("/oauth/callback")
     def oauth_callback():
         expected_state = session.pop("oauth_state", None)
