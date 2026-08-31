@@ -8,6 +8,7 @@ from gcal_sync import web_auth
 from gcal_sync.config import Config
 from gcal_sync.crypto import TokenEncryptionError, decrypt, encrypt
 from gcal_sync.db import Database
+from gcal_sync.errors import AuthenticationError
 
 
 def _key() -> str:
@@ -40,7 +41,7 @@ def test_tenant_account_key_is_namespaced_per_tenant():
     assert web_auth.tenant_account_key(7, "personal") != web_auth.tenant_account_key(9, "personal")
 
 
-def _cfg(db_path) -> Config:
+def _cfg(db_path, allowed_domain: str = "") -> Config:
     return Config(
         client_secrets_file="unused",
         token_dir="unused",
@@ -50,7 +51,31 @@ def _cfg(db_path) -> Config:
         full_resync_interval_hours=24,
         sync_window_days=14,
         log_level="INFO",
+        allowed_domain=allowed_domain,
     )
+
+
+def test_check_domain_allowed_permits_matching_domain(tmp_path):
+    web_auth.check_domain_allowed("alice@company.com", _cfg(tmp_path, "company.com"))
+
+
+def test_check_domain_allowed_is_case_insensitive(tmp_path):
+    web_auth.check_domain_allowed("Alice@Company.com", _cfg(tmp_path, "COMPANY.COM"))
+
+
+def test_check_domain_allowed_rejects_other_domain(tmp_path):
+    with pytest.raises(AuthenticationError):
+        web_auth.check_domain_allowed("alice@gmail.com", _cfg(tmp_path, "company.com"))
+
+
+def test_check_domain_allowed_rejects_suffix_spoof(tmp_path):
+    """A domain suffix match isn't enough — 'evilcompany.com' must not pass for 'company.com'."""
+    with pytest.raises(AuthenticationError):
+        web_auth.check_domain_allowed("alice@evilcompany.com", _cfg(tmp_path, "company.com"))
+
+
+def test_check_domain_allowed_permits_anything_when_unset(tmp_path):
+    web_auth.check_domain_allowed("alice@anywhere.com", _cfg(tmp_path))
 
 
 def test_single_account_tenant_is_skipped(tmp_path):

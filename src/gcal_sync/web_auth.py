@@ -43,14 +43,24 @@ def build_flow(cfg: Config, state: Optional[str] = None) -> Flow:
     )
 
 
-def get_authorization_url(cfg: Config) -> tuple[str, str]:
-    """Start a new OAuth grant. Returns (url_to_redirect_user_to, state_to_store_in_session)."""
+def get_authorization_url(cfg: Config, restrict_domain: bool = False) -> tuple[str, str]:
+    """Start a new OAuth grant. Returns (url_to_redirect_user_to, state_to_store_in_session).
+
+    `restrict_domain` adds Google's `hd` hint, which pre-filters the account chooser to
+    `cfg.allowed_domain`. It's a UI convenience only, not an access control — callers must
+    still enforce the domain server-side (see `check_domain_allowed`). Callers pass
+    `restrict_domain=True` only for a brand-new sign-up, not when an existing tenant is
+    connecting an additional (e.g. personal) calendar.
+    """
     flow = build_flow(cfg)
-    url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",
-    )
+    kwargs = {
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+    }
+    if restrict_domain and cfg.allowed_domain:
+        kwargs["hd"] = cfg.allowed_domain
+    url, state = flow.authorization_url(**kwargs)
     return url, state
 
 
@@ -68,6 +78,19 @@ def primary_calendar_email(credentials: Credentials) -> str:
         if cal.get("primary"):
             return cal["id"]
     raise AuthenticationError("Could not determine the primary calendar for this Google account.")
+
+
+def check_domain_allowed(google_email: str, cfg: Config) -> None:
+    """Enforce `ALLOWED_DOMAIN` (if set) for brand-new sign-ups.
+
+    Only called when creating a new tenant — an existing tenant's later calendar
+    connections (e.g. a personal Gmail account alongside a Workspace one) are exempt.
+    """
+    if cfg.allowed_domain and not google_email.lower().endswith(f"@{cfg.allowed_domain.lower()}"):
+        raise AuthenticationError(
+            f"Sign-up is restricted to @{cfg.allowed_domain} accounts. "
+            f"'{google_email}' is not on that domain."
+        )
 
 
 def tenant_account_key(tenant_id: int, account_label: str) -> str:

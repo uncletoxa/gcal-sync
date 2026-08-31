@@ -301,6 +301,19 @@ they're encrypted at rest with `TOKEN_ENCRYPTION_KEY`. Back that key up somewher
 separate from the DB itself; losing it makes those rows undecryptable (CLI-flow tokens
 in `data/token_*.json` are unaffected either way).
 
+### Restricting sign-up to a Workspace domain
+
+Set `ALLOWED_DOMAIN` (e.g. `ALLOWED_DOMAIN=company.com`, no leading `@`) to only allow
+Google accounts on that domain to create a new account. This only gates *brand-new*
+sign-ups — an existing user can still connect a second, non-domain calendar afterwards
+(e.g. their personal Gmail), which is the point of this app. Two things happen when it's
+set: Google's account chooser is hinted to that domain via the `hd` parameter on the
+*first* sign-in only (a UI convenience, not enforcement on its own), and the server
+independently verifies the connecting account's email domain before creating the
+tenant — so it's enforced even if someone bypasses the hint. Leave it blank to allow any
+Google account to sign up (subject to whatever the OAuth consent screen's user
+restrictions already impose).
+
 ### Running it
 
 Development:
@@ -333,6 +346,103 @@ gcal-sync" click during sign-in unless you complete full verification, but grant
 longer expire on a 7-day cycle. See this project's own `docs/index.html` /
 `docs/privacy.html` (served via GitHub Pages) as a minimal example of the home
 page / privacy policy links Google requires.
+
+## Deploying to a fresh VM (Podman)
+
+End-to-end checklist for standing up gcal-sync — including the web sign-up
+app for letting other people connect their own calendars — on a new VM you
+don't already have configured. Assumes a systemd-based Linux VM (commands
+below are Debian/Ubuntu; substitute your distro's package manager) and a
+domain you can point at it.
+
+### 1. Provision & install prerequisites
+
+```bash
+ssh <you>@<vm-host>
+sudo apt update && sudo apt install -y git podman podman-compose
+curl -LsSf https://astral.sh/uv/install.sh | sh   # only needed for the one-time auth/calendars steps below
+```
+
+### 2. Clone and install
+
+```bash
+git clone <repo-url> ~/gcal-sync && cd ~/gcal-sync
+uv sync
+cp .env.example .env
+```
+
+### 3. Google Cloud / OAuth setup
+
+Do this once, from your laptop: follow "1. Google Cloud project / API
+setup" and "2. OAuth client setup" above to create the **Desktop** OAuth
+client (needed for `gcal-sync auth`, e.g. if you're also syncing your own
+calendars via `CALENDARS`), then "Web sign-up for a team" → "Why this needs
+a second OAuth client" to create the **Web application** OAuth client
+(needed for the sign-up flow), using `https://<your-domain>/oauth/callback`
+as its redirect URI.
+
+### 4. Transfer secrets to the VM
+
+```bash
+scp client_secret.json <you>@<vm-host>:~/gcal-sync/data/
+scp web_client_secret.json <you>@<vm-host>:~/gcal-sync/data/
+```
+
+### 5. Configure `.env`
+
+Fill in both the base config ("3. Configure `.env`" above) and the web
+sign-up block (see "Web sign-up for a team" → Configuration):
+`GOOGLE_CLIENT_SECRETS_FILE`, `GOOGLE_WEB_CLIENT_SECRETS_FILE`,
+`WEB_BASE_URL=https://<your-domain>`, `WEB_SECRET_KEY`,
+`TOKEN_ENCRYPTION_KEY`. Leave `CALENDARS` blank until the next step.
+
+### 6. Authorize your own account(s), if any
+
+If you're also syncing your own calendars via the legacy `CALENDARS` group
+(not just other people's via web sign-up), run "4. Authorize each account"
+through "6. First dry run" above on the VM using `uv run` — the loopback
+OAuth server binds to a random port, so this must run directly on the host
+(via `uv run`), not inside a container. Skip this entirely if you're only
+offering the web sign-up flow to others.
+
+### 7. DNS and firewall
+
+* Point the domain's A/AAAA record at the VM's public IP.
+* Open inbound **80 and 443** in the VM's cloud firewall/security group —
+  this is separate from any OS-level firewall (e.g. `ufw`) and is commonly
+  missed. Caddy needs both ports to obtain and renew its Let's Encrypt
+  certificate.
+* Edit `deploy/Caddyfile`, replacing `gcal.yourdomain.com` with your real
+  domain.
+
+### 8. Build and run
+
+```bash
+podman build -t gcal-sync -f deploy/Dockerfile .
+podman compose -f deploy/docker-compose.yml up -d   # or: podman-compose -f deploy/docker-compose.yml up -d
+```
+
+This starts all three services defined in `deploy/docker-compose.yml`:
+`gcal-sync` (the poller), `web` (gunicorn), and `caddy` (TLS termination +
+reverse proxy). Newly web-signed-up tenants are picked up by the poller
+automatically on its next pass — no restart needed.
+
+### 9. Verify
+
+```bash
+podman logs -f gcal-sync
+podman logs -f gcal-sync-web
+```
+
+Visit `https://<your-domain>` and confirm the sign-up flow completes end to
+end.
+
+### 10. Back up
+
+Back up `~/gcal-sync/data/` regularly (tokens + SQLite state), and also
+back up `.env` separately — it holds `TOKEN_ENCRYPTION_KEY` and
+`WEB_SECRET_KEY`, which aren't stored in `data/` but are required to
+decrypt web-signed-up users' tokens and to keep existing sessions valid.
 
 ## Sync behavior notes
 

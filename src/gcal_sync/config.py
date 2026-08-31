@@ -22,6 +22,10 @@ class Config:
     web_base_url: str = ""
     web_secret_key: str = ""
     token_encryption_key: str = ""
+    # Restricts *new* sign-ups to Google accounts on this domain (e.g. "company.com").
+    # Only enforced when creating a brand-new tenant; a tenant's later, additional
+    # calendar connections (e.g. a personal Gmail account) are unaffected.
+    allowed_domain: str = ""
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:
@@ -71,4 +75,5 @@ def load_config(require_calendars: bool = True) -> Config:
         web_base_url=os.getenv("WEB_BASE_URL", ""),
         web_secret_key=os.getenv("WEB_SECRET_KEY", ""),
         token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY", ""),
+        allowed_domain=os.getenv("ALLOWED_DOMAIN", ""),
     )

@@ -34,12 +34,13 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
     def index():
         if session.get("tenant_id"):
             return redirect(url_for("dashboard"))
-        return render_template("index.html")
+        return render_template("index.html", allowed_domain=cfg.allowed_domain or None)
 
     @app.get("/login")
     def login():
+        restrict_domain = not session.get("tenant_id")
         try:
-            url, state = web_auth.get_authorization_url(cfg)
+            url, state = web_auth.get_authorization_url(cfg, restrict_domain=restrict_domain)
         except FileNotFoundError as exc:
             abort(500, str(exc))
         session["oauth_state"] = state
@@ -69,6 +70,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 )
             else:
                 google_email = web_auth.primary_calendar_email(credentials)
+                web_auth.check_domain_allowed(google_email, cfg)
                 tenant = db.get_or_create_tenant(google_email)
                 tenant_id = tenant["id"]
                 web_auth.save_connected_account(db, cfg, tenant_id=tenant_id, credentials=credentials)

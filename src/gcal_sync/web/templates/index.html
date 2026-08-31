@@ -9,6 +9,15 @@
     availability — never your event titles, descriptions, or attendees. Your calendars are
     only ever synced against each other, never against anyone else's.
   </p>
+  <p class="muted">
+    You'll sign in once per calendar. Stay signed in to gcal-sync between the two — use
+    "Connect another calendar" on your dashboard rather than signing out and starting over,
+    or you'll end up with two separate, unsynced accounts. If Google keeps offering the same
+    account for both, pick "Use another account" on its sign-in screen for the second one.
+  </p>
+  {% if allowed_domain %}
+    <p class="muted">Sign-up is restricted to <strong>@{{ allowed_domain }}</strong> accounts.</p>
+  {% endif %}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <p><a class="btn btn-primary" href="{{ url_for('login') }}">Sign in with Google</a></p>
 {% endblock %}
