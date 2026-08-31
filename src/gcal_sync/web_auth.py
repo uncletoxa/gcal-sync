@@ -26,7 +26,7 @@ def _redirect_uri(cfg: Config) -> str:
     return f"{cfg.web_base_url.rstrip('/')}/oauth/callback"
 
 
-def build_flow(cfg: Config, state: Optional[str] = None) -> Flow:
+def build_flow(cfg: Config, state: Optional[str] = None, code_verifier: Optional[str] = None) -> Flow:
     """Build the Web-application OAuth flow (fixed redirect URI, not the CLI's loopback flow)."""
     if not Path(cfg.google_web_client_secrets_file).exists():
         raise FileNotFoundError(
@@ -40,11 +40,14 @@ def build_flow(cfg: Config, state: Optional[str] = None) -> Flow:
         scopes=SCOPES,
         state=state,
         redirect_uri=_redirect_uri(cfg),
+        code_verifier=code_verifier,
     )
 
 
-def get_authorization_url(cfg: Config, restrict_domain: bool = False) -> tuple[str, str]:
-    """Start a new OAuth grant. Returns (url_to_redirect_user_to, state_to_store_in_session).
+def get_authorization_url(cfg: Config, restrict_domain: bool = False) -> tuple[str, str, str]:
+    """Start a new OAuth grant. Returns (url_to_redirect_user_to, state, code_verifier) —
+    caller must store both state and code_verifier in the session; PKCE requires the same
+    verifier be sent back in `complete_authorization`, and it isn't recoverable otherwise.
 
     `restrict_domain` adds Google's `hd` hint, which pre-filters the account chooser to
     `cfg.allowed_domain`. It's a UI convenience only, not an access control — callers must
@@ -61,12 +64,14 @@ def get_authorization_url(cfg: Config, restrict_domain: bool = False) -> tuple[s
     if restrict_domain and cfg.allowed_domain:
         kwargs["hd"] = cfg.allowed_domain
     url, state = flow.authorization_url(**kwargs)
-    return url, state
+    return url, state, flow.code_verifier
 
 
-def complete_authorization(cfg: Config, state: str, authorization_response_url: str) -> Credentials:
+def complete_authorization(
+    cfg: Config, state: str, authorization_response_url: str, code_verifier: str
+) -> Credentials:
     """Exchange the callback's ?code= for credentials. Caller must verify `state` against the session first."""
-    flow = build_flow(cfg, state=state)
+    flow = build_flow(cfg, state=state, code_verifier=code_verifier)
     flow.fetch_token(authorization_response=authorization_response_url)
     return flow.credentials
 

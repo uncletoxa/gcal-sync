@@ -40,10 +40,11 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
     def login():
         restrict_domain = not session.get("tenant_id")
         try:
-            url, state = web_auth.get_authorization_url(cfg, restrict_domain=restrict_domain)
+            url, state, code_verifier = web_auth.get_authorization_url(cfg, restrict_domain=restrict_domain)
         except FileNotFoundError as exc:
             abort(500, str(exc))
         session["oauth_state"] = state
+        session["code_verifier"] = code_verifier
         return redirect(url)
 
     @app.get("/privacy")
@@ -53,6 +54,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
     @app.get("/oauth/callback")
     def oauth_callback():
         expected_state = session.pop("oauth_state", None)
+        code_verifier = session.pop("code_verifier", None)
         got_state = request.args.get("state")
         if not expected_state or expected_state != got_state:
             abort(400, "OAuth state mismatch — please try signing in again.")
@@ -60,7 +62,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             return render_template("index.html", error="Google sign-in was cancelled or denied.")
 
         try:
-            credentials = web_auth.complete_authorization(cfg, expected_state, request.url)
+            credentials = web_auth.complete_authorization(cfg, expected_state, request.url, code_verifier)
         except Exception:
             logger.exception("oauth_callback_failed")
             abort(400, "Could not complete Google sign-in — please try again.")
