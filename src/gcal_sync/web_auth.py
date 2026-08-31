@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,12 @@ from .db import Database
 from .errors import AuthenticationError
 from .google_client import GoogleCalendarClient
 from .logging_config import log_event
+
+# The web flow shares its OAuth client with n8n and requests include_granted_scopes,
+# so Google may legitimately return a broader scope set (e.g. a prior grant of the
+# full `calendar` scope) than SCOPES asks for. oauthlib treats any scope superset as
+# a hard error during fetch_token() unless this is set.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 logger = logging.getLogger(__name__)
 
