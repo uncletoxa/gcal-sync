@@ -15,3 +15,6 @@ data/
 *.sqlite3-shm
 client_secret*.json
 token_*.json
+
+# Serena MCP local state — keep out of the public repo
+.serena/
