@@ -26,6 +26,10 @@ class Config:
     # Only enforced when creating a brand-new tenant; a tenant's later, additional
     # calendar connections (e.g. a personal Gmail account) are unaffected.
     allowed_domain: str = ""
+    # Who operates this specific instance (e.g. "Acme Corp") — shown on the /privacy page to
+    # disclose that this deployment, unlike a self-run instance, stores account/token data
+    # on the operator's infrastructure. Leave unset for a personal, self-hosted deployment.
+    operator_name: str = ""
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:
@@ -76,4 +80,5 @@ def load_config(require_calendars: bool = True) -> Config:
         web_secret_key=os.getenv("WEB_SECRET_KEY", ""),
         token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY", ""),
         allowed_domain=os.getenv("ALLOWED_DOMAIN", ""),
+        operator_name=os.getenv("OPERATOR_NAME", ""),
     )

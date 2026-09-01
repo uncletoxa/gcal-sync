@@ -15,8 +15,21 @@
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="effective">Effective 2026-08-30</p>
+  <p class="effective">Effective 2026-09-01</p>
 
+  {% if operator_name %}
+  <p>
+    gcal-sync is open-source software. This page describes this specific
+    instance{% if instance_url %} at <code>{{ instance_url }}</code>{% endif %},
+    operated by {{ operator_name }}{% if allowed_domain %} and available to
+    Google accounts on the <code>{{ allowed_domain }}</code> domain{% endif %}.
+    Unlike a self-hosted deployment of this same software &mdash; where the
+    operator is you, and no data reaches anyone else &mdash; using this
+    instance means {{ operator_name }} stores the account and token data
+    described below on infrastructure it controls, in order to run the sync
+    on your behalf.
+  </p>
+  {% else %}
   <p>
     gcal-sync is open-source software that you download and run yourself,
     on infrastructure you control. The project maintainer does not operate
@@ -24,6 +37,7 @@
     access to your Google account data. This policy describes how the
     software itself handles data when you run your own instance of it.
   </p>
+  {% endif %}
 
   <h2>Google data this software accesses</h2>
   <p>gcal-sync requests two narrow Google Calendar API scopes and nothing else:</p>
@@ -55,6 +69,18 @@
   </p>
 
   <h2>Where data is stored</h2>
+  {% if operator_name %}
+  <p>
+    On this instance, gcal-sync stores the Google account email address
+    you sign in with (to identify your account), your OAuth tokens
+    (encrypted at rest), and a record of which source events map to which
+    mirror events, in a database on the server {{ operator_name }}
+    operates. None of it is transmitted to analytics providers,
+    advertisers, or any other third party &mdash; the only outbound
+    requests this service makes are to Google's Calendar API, described
+    below.
+  </p>
+  {% else %}
   <p>
     Everything gcal-sync needs to operate &mdash; OAuth tokens and a record
     of which source events map to which mirror events &mdash; is stored
@@ -62,6 +88,7 @@
     SQLite database). None of it is transmitted to the project maintainer,
     to analytics providers, or to any other third party.
   </p>
+  {% endif %}
 
   <h2>Data sharing</h2>
   <p>
@@ -71,6 +98,16 @@
   </p>
 
   <h2>Data retention and deletion</h2>
+  {% if operator_name %}
+  <p>
+    On this instance, disconnecting a calendar from your dashboard
+    immediately deletes its stored OAuth tokens from the database. To
+    have your account record and all connected calendars removed
+    entirely, contact us as described below. You can also revoke
+    gcal-sync's access to your Google account at any time from
+    <a href="https://myaccount.google.com/permissions">Google Account &rarr; Security &rarr; Third-party access</a>.
+  </p>
+  {% else %}
   <p>
     Data is retained only for as long as you, the operator, keep it.
     Deleting the local <code>data/</code> directory removes all stored
@@ -78,14 +115,16 @@
     account at any time from
     <a href="https://myaccount.google.com/permissions">Google Account &rarr; Security &rarr; Third-party access</a>.
   </p>
+  {% endif %}
 
   <h2>Contact</h2>
   <p>
-    Questions about this software can be raised via
-    <a href="https://github.com/uncletoxa/gcal-sync/issues">GitHub Issues</a>
+    Questions about this software{% if operator_name %}, or requests to
+    delete your account data from this instance,{% endif %} can be raised
+    via <a href="https://github.com/uncletoxa/gcal-sync/issues">GitHub Issues</a>
     on the source repository.
   </p>
 
-  <p><a href="index.html">&larr; Back</a></p>
+  <p><a href="{{ url_for('index') }}">&larr; Back</a></p>
 </body>
 </html>

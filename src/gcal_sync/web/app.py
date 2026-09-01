@@ -49,7 +49,12 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
 
     @app.get("/privacy")
     def privacy():
-        return render_template("privacy.html")
+        return render_template(
+            "privacy.html",
+            operator_name=cfg.operator_name or None,
+            instance_url=cfg.web_base_url or None,
+            allowed_domain=cfg.allowed_domain or None,
+        )
 
     @app.get("/oauth/callback")
     def oauth_callback():

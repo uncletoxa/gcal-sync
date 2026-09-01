@@ -14,9 +14,12 @@
   .muted { color: #777; font-size: 0.9em; }
   .error { background: #fee; border: 1px solid #f99; padding: 0.75em; border-radius: 6px; margin-bottom: 1em; }
   form.inline { display: inline; }
+  footer { margin-top: 3rem; font-size: 0.85em; color: #777; }
+  footer a { color: inherit; }
 </style>
 </head>
 <body>
   {% block body %}{% endblock %}
+  <footer><a href="{{ url_for('privacy') }}">Privacy Policy</a></footer>
 </body>
 </html>
