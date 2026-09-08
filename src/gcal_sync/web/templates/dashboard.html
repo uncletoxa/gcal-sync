@@ -13,6 +13,13 @@
     </p>
   {% endif %}
 
+  {% if sync_error %}
+    <p class="error">{{ sync_error }}</p>
+  {% endif %}
+  {% if sync_success %}
+    <p class="success">{{ sync_success }}</p>
+  {% endif %}
+
   {% for account in accounts %}
     <div class="account">
       <div>
@@ -31,6 +38,12 @@
   <p style="margin-top: 1.5rem;">
     <a class="btn btn-primary" href="{{ url_for('login') }}">Connect another calendar</a>
   </p>
+
+  {% if not needs_second_account %}
+    <form method="post" action="{{ url_for('sync_now') }}">
+      <button class="btn-secondary" type="submit">Sync calendars</button>
+    </form>
+  {% endif %}
 
   <form method="post" action="{{ url_for('logout') }}">
     <button class="btn-secondary" type="submit">Sign out</button>

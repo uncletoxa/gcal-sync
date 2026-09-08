@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 import signal
 import time
@@ -80,16 +79,7 @@ def _run_tenant_sync_passes(cfg, db, dry_run: bool) -> int:
             continue
         ran += 1
         try:
-            tenant_calendars = {}
-            tenant_clients = {}
-            for acc in accounts:
-                key = web_auth.tenant_account_key(tenant["id"], acc["account_label"])
-                tenant_calendars[key] = acc["calendar_id"]
-                tenant_clients[key] = GoogleCalendarClient(
-                    web_auth.load_account_credentials(db, cfg, acc), key
-                )
-            tenant_cfg = dataclasses.replace(cfg, calendars=tenant_calendars)
-            run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run)
+            web_auth.sync_tenant(cfg, db, tenant["id"], accounts, dry_run=dry_run)
         except Exception:
             logger.exception("tenant_sync_pass_failed", extra={"tenant_id": tenant["id"]})
     return ran

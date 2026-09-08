@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from .db import Database
 from .errors import AuthenticationError
 from .google_client import GoogleCalendarClient
 from .logging_config import log_event
+from .sync_engine import run_sync_pass
 
 # The web flow shares its OAuth client with n8n and requests include_granted_scopes,
 # so Google may legitimately return a broader scope set (e.g. a prior grant of the
@@ -161,3 +163,20 @@ def load_account_credentials(db: Database, cfg: Config, account_row) -> Credenti
         )
 
     return creds
+
+
+def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bool = False):
+    """Run one sync pass across a single tenant's connected accounts (needs 2+).
+
+    Namespaces the accounts via `tenant_account_key` so sync_engine.py's full-mesh
+    logic only ever sees this tenant's own calendars — same isolation mechanism the
+    background poll loop (cli._run_tenant_sync_passes) relies on.
+    """
+    tenant_calendars = {}
+    tenant_clients = {}
+    for acc in accounts:
+        key = tenant_account_key(tenant_id, acc["account_label"])
+        tenant_calendars[key] = acc["calendar_id"]
+        tenant_clients[key] = GoogleCalendarClient(load_account_credentials(db, cfg, acc), key)
+    tenant_cfg = dataclasses.replace(cfg, calendars=tenant_calendars)
+    return run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run)

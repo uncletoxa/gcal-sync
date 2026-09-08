@@ -117,7 +117,29 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             tenant_email=tenant["email"],
             accounts=rows,
             needs_second_account=len(rows) < 2,
+            sync_error=session.pop("sync_error", None),
+            sync_success=session.pop("sync_success", None),
         )
+
+    @app.post("/sync")
+    def sync_now():
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        accounts = db.list_connected_accounts(tenant_id)
+        if len(accounts) < 2:
+            return redirect(url_for("dashboard"))
+        try:
+            web_auth.sync_tenant(cfg, db, tenant_id, accounts)
+        except AuthenticationError as exc:
+            session["sync_error"] = str(exc)
+        except Exception:
+            logger.exception("web_sync_failed", extra={"tenant_id": tenant_id})
+            session["sync_error"] = "Sync failed — please try again in a moment."
+        else:
+            session["sync_success"] = "Sync complete."
+            log_event(logger, "web_sync_triggered", tenant_id=tenant_id)
+        return redirect(url_for("dashboard"))
 
     @app.post("/accounts/<int:account_id>/disconnect")
     def disconnect(account_id: int):

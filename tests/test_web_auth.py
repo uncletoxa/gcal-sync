@@ -108,7 +108,7 @@ def test_tenant_sync_passes_are_namespaced_and_isolated(tmp_path, monkeypatch):
             )
 
     monkeypatch.setattr(web_auth, "load_account_credentials", lambda db, cfg, acc: object())
-    monkeypatch.setattr(cli_module, "GoogleCalendarClient", lambda creds, label: object())
+    monkeypatch.setattr(web_auth, "GoogleCalendarClient", lambda creds, label: object())
 
     seen: list[set[str]] = []
 
@@ -117,7 +117,7 @@ def test_tenant_sync_passes_are_namespaced_and_isolated(tmp_path, monkeypatch):
         seen.append(set(cfg.calendars.keys()))
         return {}
 
-    monkeypatch.setattr(cli_module, "run_sync_pass", fake_run_sync_pass)
+    monkeypatch.setattr(web_auth, "run_sync_pass", fake_run_sync_pass)
 
     ran = cli_module._run_tenant_sync_passes(_cfg(tmp_path / "s.sqlite3"), db, dry_run=True)
 
