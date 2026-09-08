@@ -20,6 +20,22 @@ def _in_days(days: float) -> str:
     return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
 
 
+def _dt(day_offset: int, hour: int, minute: int = 0) -> str:
+    """An event dateTime `day_offset` days from now, at a fixed wall-clock hour.
+
+    Sync only mirrors events inside [now, now + sync_window_days) (see
+    sync_engine._sync_window), so tests must anchor to the current date rather
+    than a hardcoded one — a hardcoded date silently falls out of the window
+    once enough real time has passed.
+    """
+    d = (datetime.now(timezone.utc) + timedelta(days=day_offset)).date()
+    return f"{d.isoformat()}T{hour:02d}:{minute:02d}:00-04:00"
+
+
+def _date(day_offset: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=day_offset)).date().isoformat()
+
+
 def _clients(fake_client, *accounts):
     accounts = accounts or ("workspace", "personal")
     return {account: fake_client for account in accounts}
@@ -48,7 +64,7 @@ def active(events: dict) -> list:
 
 # 1. New Workspace event -> personal mirror created
 def test_workspace_event_creates_personal_mirror(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
 
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
@@ -66,7 +82,7 @@ def test_workspace_event_creates_personal_mirror(db, fake_client):
 
 # 2. New personal event -> workspace mirror created
 def test_personal_event_creates_workspace_mirror(db, fake_client):
-    fake_client.seed_event(PERSONAL_CAL, make_event("p1", "2026-09-02T09:00:00-04:00", "2026-09-02T09:30:00-04:00"))
+    fake_client.seed_event(PERSONAL_CAL, make_event("p1", _dt(1, 9), _dt(1, 9, 30)))
 
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
@@ -77,42 +93,42 @@ def test_personal_event_creates_workspace_mirror(db, fake_client):
 
 # 3. Source event moved -> mirror moved
 def test_source_event_move_updates_mirror(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     fake_client.patch_event(
         WORKSPACE_CAL,
         "w1",
         {
-            "start": {"dateTime": "2026-09-01T13:00:00-04:00", "timeZone": "America/New_York"},
-            "end": {"dateTime": "2026-09-01T14:00:00-04:00", "timeZone": "America/New_York"},
+            "start": {"dateTime": _dt(1, 13), "timeZone": "America/New_York"},
+            "end": {"dateTime": _dt(1, 14), "timeZone": "America/New_York"},
         },
     )
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     personal_events = active(fake_client.events_in(PERSONAL_CAL))
     assert len(personal_events) == 1
-    assert personal_events[0]["start"]["dateTime"] == "2026-09-01T13:00:00-04:00"
-    assert personal_events[0]["end"]["dateTime"] == "2026-09-01T14:00:00-04:00"
+    assert personal_events[0]["start"]["dateTime"] == _dt(1, 13)
+    assert personal_events[0]["end"]["dateTime"] == _dt(1, 14)
 
 
 # 4. Source event duration changed -> mirror updated
 def test_source_event_duration_change_updates_mirror(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     fake_client.patch_event(
-        WORKSPACE_CAL, "w1", {"end": {"dateTime": "2026-09-01T12:00:00-04:00", "timeZone": "America/New_York"}}
+        WORKSPACE_CAL, "w1", {"end": {"dateTime": _dt(1, 12), "timeZone": "America/New_York"}}
     )
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
-    assert mirror["end"]["dateTime"] == "2026-09-01T12:00:00-04:00"
+    assert mirror["end"]["dateTime"] == _dt(1, 12)
 
 
 # 5. Source event deleted -> mirror deleted
 def test_source_event_deleted_removes_mirror(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db, _clients(fake_client))
     assert len(active(fake_client.events_in(PERSONAL_CAL))) == 1
 
@@ -124,7 +140,7 @@ def test_source_event_deleted_removes_mirror(db, fake_client):
 
 # 6. Mirror is not mirrored again (loop prevention)
 def test_mirror_is_not_remirrored(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db, _clients(fake_client))
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
@@ -134,7 +150,7 @@ def test_mirror_is_not_remirrored(db, fake_client):
 
 # 7. Re-running sync doesn't create duplicates
 def test_rerunning_sync_is_idempotent(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
 
     for _ in range(5):
         run_sync_pass(_cfg(), db, _clients(fake_client))
@@ -145,8 +161,8 @@ def test_rerunning_sync_is_idempotent(db, fake_client):
 
 # 8. Two overlapping independent source events on both calendars
 def test_overlapping_events_both_preserved(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T12:00:00-04:00"))
-    fake_client.seed_event(PERSONAL_CAL, make_event("p1", "2026-09-01T11:00:00-04:00", "2026-09-01T13:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 12)))
+    fake_client.seed_event(PERSONAL_CAL, make_event("p1", _dt(1, 11), _dt(1, 13)))
 
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
@@ -158,17 +174,17 @@ def test_overlapping_events_both_preserved(db, fake_client):
 def test_recurring_event_instances_handled_independently(db, fake_client):
     fake_client.seed_event(
         WORKSPACE_CAL,
-        make_event("w1_20260901T140000Z", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00", recurringEventId="w1"),
+        make_event("w1_instance1", _dt(1, 10), _dt(1, 11), recurringEventId="w1"),
     )
     fake_client.seed_event(
         WORKSPACE_CAL,
-        make_event("w1_20260908T140000Z", "2026-09-08T10:00:00-04:00", "2026-09-08T11:00:00-04:00", recurringEventId="w1"),
+        make_event("w1_instance2", _dt(8, 10), _dt(8, 11), recurringEventId="w1"),
     )
 
     run_sync_pass(_cfg(), db, _clients(fake_client))
     assert len(active(fake_client.events_in(PERSONAL_CAL))) == 2
 
-    fake_client.cancel_event(WORKSPACE_CAL, "w1_20260908T140000Z")
+    fake_client.cancel_event(WORKSPACE_CAL, "w1_instance2")
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     remaining = active(fake_client.events_in(PERSONAL_CAL))
@@ -177,13 +193,13 @@ def test_recurring_event_instances_handled_independently(db, fake_client):
 
 # 10. All-day events handled without timezone conversion
 def test_all_day_event_mirror(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_all_day("w1", "2026-09-05", "2026-09-06"))
+    fake_client.seed_event(WORKSPACE_CAL, make_all_day("w1", _date(1), _date(2)))
 
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
-    assert mirror["start"] == {"date": "2026-09-05"}
-    assert mirror["end"] == {"date": "2026-09-06"}
+    assert mirror["start"] == {"date": _date(1)}
+    assert mirror["end"] == {"date": _date(2)}
 
 
 # 11. Restarting the service preserves mappings (DB is reopened from the same file)
@@ -191,7 +207,7 @@ def test_restart_preserves_mappings(tmp_path, fake_client):
     db_path = str(tmp_path / "state.sqlite3")
 
     db1 = Database(db_path)
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db1, _clients(fake_client))
     db1.close()
 
@@ -204,12 +220,12 @@ def test_restart_preserves_mappings(tmp_path, fake_client):
 
 # 12. Invalid/expired sync token triggers a safe full resync, no duplicates
 def test_expired_sync_token_triggers_full_resync(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
     token = db.get_sync_token("workspace")
     fake_client.expire_token(WORKSPACE_CAL, token)
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w2", "2026-09-02T10:00:00-04:00", "2026-09-02T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w2", _dt(2, 10), _dt(2, 11)))
 
     run_sync_pass(_cfg(), db, _clients(fake_client))
 
@@ -219,7 +235,7 @@ def test_expired_sync_token_triggers_full_resync(db, fake_client):
 
 # Transparent ("free") source events should not create a Busy mirror.
 def test_transparent_event_is_skipped_and_removed_if_it_becomes_transparent(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
     run_sync_pass(_cfg(), db, _clients(fake_client))
     assert len(active(fake_client.events_in(PERSONAL_CAL))) == 1
 
@@ -231,7 +247,7 @@ def test_transparent_event_is_skipped_and_removed_if_it_becomes_transparent(db, 
 
 # Dry-run must not write anything
 def test_dry_run_makes_no_changes(db, fake_client):
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
 
     run_sync_pass(_cfg(), db, _clients(fake_client), dry_run=True)
 
@@ -248,7 +264,7 @@ def test_three_calendars_fan_out_and_no_loop(db, fake_client):
     cfg = _cfg(calendars={"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL, "team": TEAM_CAL})
     clients = _clients(fake_client, "workspace", "personal", "team")
 
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
 
     run_sync_pass(cfg, db, clients)
 
@@ -305,9 +321,9 @@ def test_three_calendars_each_source_reaches_both_others(db, fake_client):
     cfg = _cfg(calendars={"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL, "team": TEAM_CAL})
     clients = _clients(fake_client, "workspace", "personal", "team")
 
-    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", "2026-09-01T10:00:00-04:00", "2026-09-01T11:00:00-04:00"))
-    fake_client.seed_event(PERSONAL_CAL, make_event("p1", "2026-09-02T10:00:00-04:00", "2026-09-02T11:00:00-04:00"))
-    fake_client.seed_event(TEAM_CAL, make_event("t1", "2026-09-03T10:00:00-04:00", "2026-09-03T11:00:00-04:00"))
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    fake_client.seed_event(PERSONAL_CAL, make_event("p1", _dt(2, 10), _dt(2, 11)))
+    fake_client.seed_event(TEAM_CAL, make_event("t1", _dt(3, 10), _dt(3, 11)))
 
     run_sync_pass(cfg, db, clients)
 
