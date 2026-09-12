@@ -343,9 +343,9 @@ verification review for a small internal rollout — it just requires the Brandi
 to be complete (app name, support email, developer contact, home page, privacy policy).
 Users will see a one-time "Google hasn't verified this app → Advanced → Go to
 gcal-sync" click during sign-in unless you complete full verification, but grants no
-longer expire on a 7-day cycle. See this project's own `docs/index.html` /
-`docs/privacy.html` (served via GitHub Pages) as a minimal example of the home
-page / privacy policy links Google requires.
+longer expire on a 7-day cycle. This app's own `/` and `/privacy` routes
+satisfy the home page / privacy policy links Google requires — point the
+Branding page at your deployed instance's URLs.
 
 ## Deploying to a fresh VM (Podman)
 
