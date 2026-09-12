@@ -30,6 +30,9 @@ class Config:
     # disclose that this deployment, unlike a self-run instance, stores account/token data
     # on the operator's infrastructure. Leave unset for a personal, self-hosted deployment.
     operator_name: str = ""
+    # Contact address shown on the /privacy page for account/data questions specific to this
+    # instance. Left unset, the page falls back to directing everything to GitHub Issues.
+    contact_email: str = ""
     # Directed (source, dest) account-name pairs opted into mirroring full event data
     # (title, description, location) instead of just a "Busy" placeholder. Every pair not
     # listed here keeps the default busy-only behavior.
@@ -119,5 +122,6 @@ def load_config(require_calendars: bool = True) -> Config:
         token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY", ""),
         allowed_domain=os.getenv("ALLOWED_DOMAIN", ""),
         operator_name=os.getenv("OPERATOR_NAME", ""),
+        contact_email=os.getenv("CONTACT_EMAIL", ""),
         full_copy_pairs=full_copy_pairs,
     )

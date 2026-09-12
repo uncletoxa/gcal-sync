@@ -54,6 +54,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             operator_name=cfg.operator_name or None,
             instance_url=cfg.web_base_url or None,
             allowed_domain=cfg.allowed_domain or None,
+            contact_email=cfg.contact_email or None,
         )
 
     @app.get("/oauth/callback")

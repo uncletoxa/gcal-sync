@@ -163,12 +163,23 @@
   {% endif %}
 
   <h2>Contact</h2>
+  {% if contact_email %}
+  <p>
+    For any question about this instance{% if operator_name %} or your
+    account{% endif %}, email
+    <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>. Please use
+    <a href="https://github.com/uncletoxa/gcal-sync/issues">GitHub Issues</a>
+    on the source repository only for questions or problems related to the
+    gcal-sync code itself.
+  </p>
+  {% else %}
   <p>
     Questions about this software{% if operator_name %}, or requests to
     delete your account data from this instance,{% endif %} can be raised
     via <a href="https://github.com/uncletoxa/gcal-sync/issues">GitHub Issues</a>
     on the source repository.
   </p>
+  {% endif %}
 
   <p><a href="{{ url_for('index') }}">&larr; Back</a></p>
 </body>
