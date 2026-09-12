@@ -8,11 +8,17 @@ WORKSPACE_CAL = "workspace-cal-id"
 PERSONAL_CAL = "personal-cal-id"
 
 
-def _cfg(full_resync_interval_hours: float = 24.0, sync_window_days: float = 14.0, calendars=None):
+def _cfg(
+    full_resync_interval_hours: float = 24.0,
+    sync_window_days: float = 14.0,
+    calendars=None,
+    full_copy_pairs=frozenset(),
+):
     return SimpleNamespace(
         calendars=calendars or {"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL},
         full_resync_interval_hours=full_resync_interval_hours,
         sync_window_days=sync_window_days,
+        full_copy_pairs=full_copy_pairs,
     )
 
 
@@ -331,3 +337,83 @@ def test_three_calendars_each_source_reaches_both_others(db, fake_client):
     assert len(active(fake_client.events_in(WORKSPACE_CAL))) == 3
     assert len(active(fake_client.events_in(PERSONAL_CAL))) == 3
     assert len(active(fake_client.events_in(TEAM_CAL))) == 3
+
+
+# -- full copy mode ---------------------------------------------------------
+
+def test_full_copy_pair_mirrors_title_description_location(db, fake_client):
+    fake_client.seed_event(
+        WORKSPACE_CAL,
+        make_event(
+            "w1", _dt(1, 10), _dt(1, 11),
+            summary="Team sync", description="Discuss roadmap", location="Room 4",
+        ),
+    )
+    cfg = _cfg(full_copy_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["summary"] == "Team sync"
+    assert mirror["description"] == "Discuss roadmap"
+    assert mirror["location"] == "Room 4"
+
+
+def test_full_copy_never_copies_attendees(db, fake_client):
+    fake_client.seed_event(
+        WORKSPACE_CAL,
+        make_event(
+            "w1", _dt(1, 10), _dt(1, 11),
+            attendees=[{"email": "someone@example.com"}],
+        ),
+    )
+    cfg = _cfg(full_copy_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert "attendees" not in mirror
+
+
+def test_full_copy_appends_hangout_link_to_description(db, fake_client):
+    fake_client.seed_event(
+        WORKSPACE_CAL,
+        make_event(
+            "w1", _dt(1, 10), _dt(1, 11),
+            description="Discuss roadmap", hangoutLink="https://meet.google.com/abc-defg-hij",
+        ),
+    )
+    cfg = _cfg(full_copy_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert "Discuss roadmap" in mirror["description"]
+    assert "https://meet.google.com/abc-defg-hij" in mirror["description"]
+
+
+def test_full_copy_only_applies_to_configured_direction(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    fake_client.seed_event(PERSONAL_CAL, make_event("p1", _dt(2, 10), _dt(2, 11)))
+    # Only workspace -> personal is opted into full copy; personal -> workspace stays busy-only.
+    cfg = _cfg(full_copy_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    workspace_to_personal = next(e for e in active(fake_client.events_in(PERSONAL_CAL)) if e["id"] != "p1")
+    assert workspace_to_personal["summary"] == "Original title - must never be copied"
+
+    personal_to_workspace = next(e for e in active(fake_client.events_in(WORKSPACE_CAL)) if e["id"] != "w1")
+    assert personal_to_workspace["summary"] == "Busy"
+
+
+def test_full_copy_description_change_triggers_mirror_update(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11), description="v1"))
+    cfg = _cfg(full_copy_pairs=frozenset({("workspace", "personal")}))
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    fake_client.patch_event(WORKSPACE_CAL, "w1", {"description": "v2"})
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["description"] == "v2"

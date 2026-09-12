@@ -39,6 +39,31 @@
     <a class="btn btn-primary" href="{{ url_for('login') }}">Connect another calendar</a>
   </p>
 
+  {% if pairs %}
+    <h2 style="margin-top: 2rem;">Sync settings</h2>
+    <p class="muted">
+      By default only busy/free blocks are mirrored. Enable full copy to also mirror
+      title, description, and location for a specific direction. Attendees are never
+      copied either way.
+    </p>
+    {% for pair in pairs %}
+      <div class="account">
+        <div>
+          {{ pair.source_email }} &rarr; {{ pair.dest_email }}:
+          <strong>{{ "Full copy" if pair.full_copy else "Busy only" }}</strong>
+        </div>
+        <form class="inline" method="post" action="{{ url_for('toggle_pair_copy_mode') }}">
+          <input type="hidden" name="source_account_label" value="{{ pair.source_label }}">
+          <input type="hidden" name="dest_account_label" value="{{ pair.dest_label }}">
+          <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
+          <button class="btn-secondary" type="submit">
+            {{ "Disable full copy" if pair.full_copy else "Enable full copy" }}
+          </button>
+        </form>
+      </div>
+    {% endfor %}
+  {% endif %}
+
   {% if not needs_second_account %}
     <form method="post" action="{{ url_for('sync_now') }}">
       <button class="btn-secondary" type="submit">Sync calendars</button>

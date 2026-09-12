@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -19,12 +18,6 @@ from .errors import AuthenticationError
 from .google_client import GoogleCalendarClient
 from .logging_config import log_event
 from .sync_engine import run_sync_pass
-
-# The web flow shares its OAuth client with n8n and requests include_granted_scopes,
-# so Google may legitimately return a broader scope set (e.g. a prior grant of the
-# full `calendar` scope) than SCOPES asks for. oauthlib treats any scope superset as
-# a hard error during fetch_token() unless this is set.
-os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 logger = logging.getLogger(__name__)
 
@@ -178,5 +171,9 @@ def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bo
         key = tenant_account_key(tenant_id, acc["account_label"])
         tenant_calendars[key] = acc["calendar_id"]
         tenant_clients[key] = GoogleCalendarClient(load_account_credentials(db, cfg, acc), key)
-    tenant_cfg = dataclasses.replace(cfg, calendars=tenant_calendars)
+    full_copy_pairs = frozenset(
+        (tenant_account_key(tenant_id, source), tenant_account_key(tenant_id, dest))
+        for source, dest in db.get_full_copy_pairs(tenant_id)
+    )
+    tenant_cfg = dataclasses.replace(cfg, calendars=tenant_calendars, full_copy_pairs=full_copy_pairs)
     return run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run)

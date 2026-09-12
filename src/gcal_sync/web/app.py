@@ -112,10 +112,24 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             }
             for acc in accounts
         ]
+        full_copy_pairs = db.get_full_copy_pairs(tenant_id)
+        pairs = [
+            {
+                "source_label": source["account_label"],
+                "dest_label": dest["account_label"],
+                "source_email": source["google_email"],
+                "dest_email": dest["google_email"],
+                "full_copy": (source["account_label"], dest["account_label"]) in full_copy_pairs,
+            }
+            for source in accounts
+            for dest in accounts
+            if source["id"] != dest["id"]
+        ]
         return render_template(
             "dashboard.html",
             tenant_email=tenant["email"],
             accounts=rows,
+            pairs=pairs,
             needs_second_account=len(rows) < 2,
             sync_error=session.pop("sync_error", None),
             sync_success=session.pop("sync_success", None),
@@ -139,6 +153,24 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         else:
             session["sync_success"] = "Sync complete."
             log_event(logger, "web_sync_triggered", tenant_id=tenant_id)
+        return redirect(url_for("dashboard"))
+
+    @app.post("/pairs/copy-mode")
+    def toggle_pair_copy_mode():
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        source_label = request.form.get("source_account_label", "")
+        dest_label = request.form.get("dest_account_label", "")
+        mode = request.form.get("mode", "")
+        valid_labels = {acc["account_label"] for acc in db.list_connected_accounts(tenant_id)}
+        if source_label not in valid_labels or dest_label not in valid_labels or mode not in ("full", "busy_only"):
+            abort(400)
+        db.set_pair_copy_mode(tenant_id, source_label, dest_label, mode)
+        log_event(
+            logger, "web_pair_copy_mode_changed",
+            tenant_id=tenant_id, source=source_label, dest=dest_label, mode=mode,
+        )
         return redirect(url_for("dashboard"))
 
     @app.post("/accounts/<int:account_id>/disconnect")

@@ -15,7 +15,7 @@
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="effective">Effective 2026-08-30</p>
+  <p class="effective">Effective 2026-09-12</p>
 
   <p>
     gcal-sync is open-source software that you download and run yourself,
@@ -53,11 +53,26 @@
 
   <h2>What gets copied between calendars</h2>
   <p>
-    Only the start/end time, busy/free status, and recurrence pattern of a
-    source event are copied into a placeholder mirror event on the other
-    calendars. Titles, descriptions, attendees, locations, and conferencing
-    links are never copied, read into logs, or stored anywhere. Events
-    marked &ldquo;Free&rdquo; are ignored entirely.
+    The Calendar API returns full event data (including title, description,
+    attendees, location, and conferencing links) when gcal-sync reads your
+    calendar. By default, only the start/end time, busy/free status, and
+    recurrence pattern are copied into a placeholder mirror event on the
+    other calendars. Events marked &ldquo;Free&rdquo; are ignored entirely.
+  </p>
+  <p>
+    You can explicitly opt a specific direction between two of your own
+    calendars into &ldquo;full copy&rdquo; mode (via the <code>FULL_COPY_PAIRS</code>
+    configuration setting), which additionally mirrors the event's title,
+    description, location, and meeting link. This is off by default for
+    every calendar and must be turned on deliberately per direction.
+    Attendees are never copied, under either mode.
+  </p>
+  <p>
+    For any calendar direction where full copy is not enabled, titles,
+    descriptions, attendees, locations, and conferencing links exist only
+    in memory for the moment it takes to process each event during a sync
+    pass, and are discarded immediately afterward &mdash; they are never
+    written to disk, to the local database, to logs, or anywhere else.
   </p>
 
   <h2>Where data is stored</h2>
@@ -67,6 +82,28 @@
     locally on the machine you deploy it on (as local files and a local
     SQLite database). None of it is transmitted to the project maintainer,
     to analytics providers, or to any other third party.
+  </p>
+
+  <h2>How this data is protected</h2>
+  <p>
+    All requests to Google's Calendar API are made over HTTPS/TLS; gcal-sync
+    never transmits OAuth tokens or calendar data over an unencrypted
+    connection.
+  </p>
+  <p>
+    OAuth tokens are written to local files with permissions restricted to
+    the operating system user running gcal-sync (mode <code>0600</code>:
+    readable and writable only by that user). No other process or account
+    on the machine can read them without elevated privileges, and nothing
+    is transmitted off the machine except the HTTPS calls to Google's
+    Calendar API described above.
+  </p>
+  <p>
+    If you're using a hosted deployment operated by someone else rather
+    than running your own instance, that operator's own privacy policy
+    (typically at its <code>/privacy</code> path) describes the additional
+    protections &mdash; such as encryption at rest &mdash; it applies to
+    data stored on its infrastructure.
   </p>
 
   <h2>Data sharing</h2>

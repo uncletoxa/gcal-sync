@@ -152,3 +152,35 @@ def test_list_tenants_with_accounts_and_isolation(tmp_path):
     assert db.get_sync_token(key1) == "token-for-tenant-1"
 
     db.close()
+
+
+def test_pair_copy_mode_defaults_to_empty_and_roundtrips(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    assert db.get_full_copy_pairs(tenant["id"]) == set()
+
+    db.set_pair_copy_mode(tenant["id"], "alice@example.com", "alice@work.com", "full")
+    assert db.get_full_copy_pairs(tenant["id"]) == {("alice@example.com", "alice@work.com")}
+
+    # The reverse direction is untouched.
+    assert ("alice@work.com", "alice@example.com") not in db.get_full_copy_pairs(tenant["id"])
+
+    # Flipping back to busy_only removes it from the full-copy set.
+    db.set_pair_copy_mode(tenant["id"], "alice@example.com", "alice@work.com", "busy_only")
+    assert db.get_full_copy_pairs(tenant["id"]) == set()
+
+    db.close()
+
+
+def test_pair_copy_mode_is_isolated_per_tenant(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    t1 = db.get_or_create_tenant("t1@example.com")
+    t2 = db.get_or_create_tenant("t2@example.com")
+
+    db.set_pair_copy_mode(t1["id"], "a", "b", "full")
+
+    assert db.get_full_copy_pairs(t1["id"]) == {("a", "b")}
+    assert db.get_full_copy_pairs(t2["id"]) == set()
+
+    db.close()

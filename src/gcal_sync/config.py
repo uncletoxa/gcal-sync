@@ -30,6 +30,10 @@ class Config:
     # disclose that this deployment, unlike a self-run instance, stores account/token data
     # on the operator's infrastructure. Leave unset for a personal, self-hosted deployment.
     operator_name: str = ""
+    # Directed (source, dest) account-name pairs opted into mirroring full event data
+    # (title, description, location) instead of just a "Busy" placeholder. Every pair not
+    # listed here keeps the default busy-only behavior.
+    full_copy_pairs: frozenset[tuple[str, str]] = frozenset()
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:
@@ -52,6 +56,38 @@ def _parse_calendars(raw: str) -> dict[str, str]:
     return calendars
 
 
+def _parse_pairs(raw: str, calendars: dict[str, str]) -> frozenset[tuple[str, str]]:
+    """Parse 'source:dest,source:dest,...' into a set of directed account-name pairs.
+
+    Both names in each entry must be keys of `calendars` — this runs after
+    `_parse_calendars` so unknown or self-paired account names are caught early
+    rather than silently never matching in `sync_all_pairs`.
+    """
+    pairs: set[tuple[str, str]] = set()
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" not in entry:
+            raise SystemExit(
+                f"Invalid FULL_COPY_PAIRS entry '{entry}': expected '<source>:<dest>' "
+                "(see .env.example)."
+            )
+        source, dest = (part.strip() for part in entry.split(":", 1))
+        if not source or not dest:
+            raise SystemExit(f"Invalid FULL_COPY_PAIRS entry '{entry}': source and dest must be non-empty.")
+        if source == dest:
+            raise SystemExit(f"Invalid FULL_COPY_PAIRS entry '{entry}': source and dest must differ.")
+        for name in (source, dest):
+            if name not in calendars:
+                raise SystemExit(
+                    f"Invalid FULL_COPY_PAIRS entry '{entry}': '{name}' is not a configured "
+                    "CALENDARS account name."
+                )
+        pairs.add((source, dest))
+    return frozenset(pairs)
+
+
 def load_config(require_calendars: bool = True) -> Config:
     load_dotenv()
 
@@ -63,6 +99,8 @@ def load_config(require_calendars: bool = True) -> Config:
             "'<account>:<calendar_id>' entries, comma-separated. Set it in .env (see "
             ".env.example) or run `gcal-sync calendars --account <name>` to discover IDs."
         )
+
+    full_copy_pairs = _parse_pairs(os.getenv("FULL_COPY_PAIRS", ""), calendars)
 
     return Config(
         client_secrets_file=os.getenv("GOOGLE_CLIENT_SECRETS_FILE", "data/client_secret.json"),
@@ -81,4 +119,5 @@ def load_config(require_calendars: bool = True) -> Config:
         token_encryption_key=os.getenv("TOKEN_ENCRYPTION_KEY", ""),
         allowed_domain=os.getenv("ALLOWED_DOMAIN", ""),
         operator_name=os.getenv("OPERATOR_NAME", ""),
+        full_copy_pairs=full_copy_pairs,
     )

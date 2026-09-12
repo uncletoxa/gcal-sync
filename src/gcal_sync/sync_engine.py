@@ -49,14 +49,27 @@ def should_skip_event(event: dict) -> bool:
     return False
 
 
-def event_signature(event: dict) -> str:
-    """A stable fingerprint of the parts of the event we mirror (start/end only)."""
-    return json.dumps({"start": event.get("start"), "end": event.get("end")}, sort_keys=True)
+def event_signature(event: dict, full_copy: bool = False) -> str:
+    """A stable fingerprint of the parts of the event we mirror.
+
+    Start/end always matter; with `full_copy` the fields it also mirrors
+    (title, description, location, meeting link) are fingerprinted too, so
+    edits to those propagate even when the event's timing hasn't changed.
+    """
+    fields = {"start": event.get("start"), "end": event.get("end")}
+    if full_copy:
+        fields["summary"] = event.get("summary")
+        fields["description"] = event.get("description")
+        fields["location"] = event.get("location")
+        fields["hangoutLink"] = event.get("hangoutLink")
+    return json.dumps(fields, sort_keys=True)
 
 
-def build_mirror_body(event: dict, source_account: str, source_calendar_id: str) -> dict:
+def build_mirror_body(
+    event: dict, source_account: str, source_calendar_id: str, full_copy: bool = False
+) -> dict:
     body = {
-        "summary": "Busy",
+        "summary": (event.get("summary") or "Busy") if full_copy else "Busy",
         "visibility": "private",
         "transparency": "opaque",
         "reminders": {"useDefault": False},
@@ -70,6 +83,17 @@ def build_mirror_body(event: dict, source_account: str, source_calendar_id: str)
             }
         },
     }
+    if full_copy:
+        description = event.get("description", "")
+        hangout_link = event.get("hangoutLink")
+        if hangout_link:
+            link_note = f"Meeting link: {hangout_link}"
+            description = f"{description}\n\n{link_note}" if description else link_note
+        if description:
+            body["description"] = description
+        location = event.get("location")
+        if location:
+            body["location"] = location
     start, end = event.get("start", {}), event.get("end", {})
     if "date" in start:
         # All-day event: copy the date strings as-is, no timezone involved.
@@ -216,6 +240,7 @@ def propagate_to_destination(
     window_start: datetime,
     window_end: datetime,
     dry_run: bool = False,
+    full_copy: bool = False,
 ) -> SyncStats:
     """Mirror one source calendar's busy blocks into one destination calendar."""
     stats = SyncStats()
@@ -255,8 +280,8 @@ def propagate_to_destination(
                 log_event(logger, "event_skipped", source=source_calendar_key, dest=dest_account)
             continue
 
-        signature = event_signature(event)
-        body = build_mirror_body(event, source_account, source_calendar_id)
+        signature = event_signature(event, full_copy)
+        body = build_mirror_body(event, source_account, source_calendar_id, full_copy)
 
         if mapping is None or mapping["status"] != "active" or not mapping["dest_event_id"]:
             if not dry_run:
@@ -323,12 +348,17 @@ def sync_all_pairs(
     full_resync_interval_hours: float = 24.0,
     sync_window_days: float = 14.0,
     dry_run: bool = False,
+    full_copy_pairs: frozenset[tuple[str, str]] = frozenset(),
 ) -> dict[str, SyncStats]:
     """Mirror busy blocks between every ordered pair of configured calendars.
 
     Each calendar's events are fetched exactly once per pass and then fanned out
     to every *other* configured calendar, so this scales to any number (2+) of
     calendars without re-fetching the same source multiple times per pass.
+
+    `full_copy_pairs` opts specific directed (source, dest) pairs into mirroring
+    title/description/location instead of just a "Busy" placeholder; every pair
+    not listed keeps the default busy-only behavior.
     """
     accounts = list(calendar_ids)
     pair_stats: dict[str, SyncStats] = {}
@@ -360,6 +390,7 @@ def sync_all_pairs(
                 window_start=window_start,
                 window_end=window_end,
                 dry_run=dry_run,
+                full_copy=(source_account, dest_account) in full_copy_pairs,
             )
 
         if not dry_run:
@@ -386,6 +417,7 @@ def run_sync_pass(
         full_resync_interval_hours=cfg.full_resync_interval_hours,
         sync_window_days=cfg.sync_window_days,
         dry_run=dry_run,
+        full_copy_pairs=cfg.full_copy_pairs,
     )
 
     log_event(logger, "sync_completed", **{key: vars(stats) for key, stats in pair_stats.items()})

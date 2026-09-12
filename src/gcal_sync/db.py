@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS connected_accounts (
     updated_at TEXT NOT NULL,
     UNIQUE(tenant_id, account_label)
 );
+
+CREATE TABLE IF NOT EXISTS pair_settings (
+    tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+    source_account_label TEXT NOT NULL,
+    dest_account_label TEXT NOT NULL,
+    copy_mode TEXT NOT NULL DEFAULT 'busy_only',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, source_account_label, dest_account_label)
+);
 """
 
 
@@ -242,3 +251,31 @@ class Database:
         """All tenants paired with their connected accounts, for the sync poller."""
         tenants = self._conn.execute("SELECT * FROM tenants ORDER BY id").fetchall()
         return [(tenant, self.list_connected_accounts(tenant["id"])) for tenant in tenants]
+
+    # -- pair settings (web sign-up) --------------------------------------
+    def get_full_copy_pairs(self, tenant_id: int) -> set[tuple[str, str]]:
+        """Directed (source_label, dest_label) pairs opted into full event copy."""
+        rows = self._conn.execute(
+            """
+            SELECT source_account_label, dest_account_label FROM pair_settings
+            WHERE tenant_id = ? AND copy_mode = 'full'
+            """,
+            (tenant_id,),
+        ).fetchall()
+        return {(row["source_account_label"], row["dest_account_label"]) for row in rows}
+
+    def set_pair_copy_mode(
+        self, tenant_id: int, source_account_label: str, dest_account_label: str, copy_mode: str
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO pair_settings (
+                tenant_id, source_account_label, dest_account_label, copy_mode, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, source_account_label, dest_account_label) DO UPDATE SET
+                copy_mode = excluded.copy_mode,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, source_account_label, dest_account_label, copy_mode, _now()),
+        )
+        self._conn.commit()
