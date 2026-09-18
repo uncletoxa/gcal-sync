@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from .config import MAX_SYNC_WINDOW_DAYS
 from .db import Database
 from .errors import SyncTokenExpiredError
 from .google_client import CalendarClient
@@ -556,7 +557,13 @@ def sync_all_pairs(
 
     for source_account in accounts:
         source_calendar_id = calendar_ids[source_account]
-        source_sync_window_days = sync_window_overrides.get(source_account, sync_window_days)
+        # Clamped regardless of where the value came from (instance default or a
+        # per-account override) — this is the one place the resolved window actually
+        # bounds an API fetch, so it's the backstop even if a stale/manual value
+        # upstream exceeds the cap.
+        source_sync_window_days = min(
+            sync_window_overrides.get(source_account, sync_window_days), MAX_SYNC_WINDOW_DAYS
+        )
         events, next_sync_token, source_force_full, window_start, window_end = _fetch_source_events(
             clients[source_account],
             db,

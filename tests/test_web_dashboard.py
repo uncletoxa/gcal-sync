@@ -272,6 +272,27 @@ def test_set_calendar_sync_window_rejects_non_positive(tmp_path):
     db.close()
 
 
+def test_set_calendar_sync_window_rejects_over_max(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    db.upsert_connected_account(
+        tenant_id=tenant_id, account_label="a@example.com",
+        google_email="a@example.com", calendar_id="a@example.com", credentials_json="cipher",
+    )
+    account_id = _account_id(db, tenant_id, "a@example.com")
+
+    resp = client.post(
+        f"/calendars/{account_id}/sync-window",
+        data={"sync_window_days": "365"},
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+    assert b"can&#39;t exceed 56 days" in resp.data
+    assert db.get_connected_account(tenant_id, account_id)["sync_window_days"] is None
+    db.close()
+
+
 def test_toggle_pair_copy_mode_rejects_unknown_account(tmp_path):
     client, db = _client(tmp_path)
     tenant_id = _sign_in(client, db)

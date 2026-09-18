@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from gcal_sync.config import MAX_SYNC_WINDOW_DAYS
 from gcal_sync.db import Database
 from gcal_sync.sync_engine import run_sync_pass
 
@@ -690,6 +691,18 @@ def test_sync_window_override_applies_per_source_account(db, fake_client):
     run_sync_pass(cfg, db, _clients(fake_client))
 
     assert len(active(fake_client.events_in(PERSONAL_CAL))) == 1
+
+
+def test_sync_window_override_is_capped_at_max(db, fake_client):
+    far_out_day = int(MAX_SYNC_WINDOW_DAYS) + 5
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(far_out_day, 10), _dt(far_out_day, 11)))
+    # An override far beyond MAX_SYNC_WINDOW_DAYS must still be clamped to the cap, so
+    # this event (just past it) is not mirrored.
+    cfg = _cfg(sync_window_days=1, sync_window_overrides={"workspace": 365})
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    assert active(fake_client.events_in(PERSONAL_CAL)) == []
 
 
 def test_sync_window_override_only_affects_overridden_account(db, fake_client):

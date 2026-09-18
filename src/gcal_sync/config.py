@@ -6,6 +6,14 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+# Hard ceiling on sync_window_days (both the instance-wide default and any per-account
+# override): a bigger window multiplies force_full fetch cost and recurring-event
+# instance count (each expanded instance is a separate mirrored event), while scheduling
+# value drops off sharply past the near/medium term. 56 days (~8 weeks) covers realistic
+# planning horizons — quarter-start travel, a vacation booked a month or two out — without
+# inviting runaway cost from an effectively unbounded window.
+MAX_SYNC_WINDOW_DAYS: float = 56.0
+
 
 @dataclass
 class Config:

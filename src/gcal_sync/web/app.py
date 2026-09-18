@@ -7,7 +7,7 @@ from flask import Flask, abort, redirect, render_template, request, session, url
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .. import web_auth
-from ..config import Config, load_config
+from ..config import MAX_SYNC_WINDOW_DAYS, Config, load_config
 from ..db import Database
 from ..errors import AuthenticationError
 from ..logging_config import log_event, setup_logging
@@ -200,7 +200,8 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 ),
                 "sync_window_days": account["sync_window_days"],
             },
-            default_sync_window_days=cfg.sync_window_days,
+            default_sync_window_days=min(cfg.sync_window_days, MAX_SYNC_WINDOW_DAYS),
+            max_sync_window_days=MAX_SYNC_WINDOW_DAYS,
             incoming=incoming,
             event_colors=EVENT_COLORS,
             sync_window_error=session.pop("sync_window_error", None),
@@ -224,6 +225,11 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 days = None
             if days is None or days <= 0:
                 session["sync_window_error"] = "Sync window must be a positive number of days."
+                return redirect(url_for("calendar_detail", account_id=account_id))
+            if days > MAX_SYNC_WINDOW_DAYS:
+                session["sync_window_error"] = (
+                    f"Sync window can't exceed {MAX_SYNC_WINDOW_DAYS:.0f} days (~8 weeks)."
+                )
                 return redirect(url_for("calendar_detail", account_id=account_id))
             db.set_account_sync_window(tenant_id, account_id, days)
         log_event(logger, "web_calendar_sync_window_changed", tenant_id=tenant_id, account_id=account_id)
