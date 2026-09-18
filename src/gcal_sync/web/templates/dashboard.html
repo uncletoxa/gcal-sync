@@ -2,47 +2,49 @@
 {% block title %}Dashboard — GCal Sync{% endblock %}
 {% block body %}
   <h1>Your calendars</h1>
-  <p class="muted">Signed in as {{ tenant_email }}</p>
+  <p class="text-muted">Signed in as {{ tenant_email }}</p>
 
   {% if needs_second_account %}
-    <p class="error">
+    <div class="alert alert-warning">
       Connect at least one more calendar to start syncing — availability only mirrors
       between calendars in your own account. Use "Connect another calendar" below, and if
       Google offers you the account you already connected, choose "Use another account" to
       pick the next one.
-    </p>
+    </div>
   {% endif %}
 
   {% if sync_error %}
-    <p class="error">{{ sync_error }}</p>
+    <div class="alert alert-danger">{{ sync_error }}</div>
   {% endif %}
   {% if sync_success %}
-    <p class="success">{{ sync_success }}</p>
+    <div class="alert alert-success">{{ sync_success }}</div>
   {% endif %}
 
-  {% for account in accounts %}
-    <div class="account">
-      <div>
-        <strong>{{ account.email }}</strong><br>
-        <span class="muted">
-          {% if account.last_synced %}Last synced {{ account.last_synced }}{% else %}Not yet synced{% endif %}
-        </span>
+  <div class="list-group mb-3">
+    {% for account in accounts %}
+      <div class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <strong>{{ account.email }}</strong><br>
+          <span class="text-muted small">
+            {% if account.last_synced %}Last synced {{ account.last_synced }}{% else %}Not yet synced{% endif %}
+          </span>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('calendar_detail', account_id=account.id) }}">Manage</a>
       </div>
-      <a class="btn btn-secondary" href="{{ url_for('calendar_detail', account_id=account.id) }}">Manage</a>
-    </div>
-  {% endfor %}
+    {% endfor %}
+  </div>
 
-  <p style="margin-top: 1.5rem;">
-    <a class="btn btn-primary" href="{{ url_for('login') }}">Connect another calendar</a>
-  </p>
+  <a class="btn btn-primary mb-4" href="{{ url_for('login') }}">Connect another calendar</a>
 
-  {% if not needs_second_account %}
-    <form method="post" action="{{ url_for('sync_now') }}">
-      <button class="btn-secondary" type="submit">Sync calendars</button>
+  <div class="d-flex gap-2">
+    {% if not needs_second_account %}
+      <form method="post" action="{{ url_for('sync_now') }}">
+        <button class="btn btn-outline-secondary" type="submit">Sync calendars</button>
+      </form>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('logout') }}">
+      <button class="btn btn-outline-secondary" type="submit">Sign out</button>
     </form>
-  {% endif %}
-
-  <form method="post" action="{{ url_for('logout') }}">
-    <button class="btn-secondary" type="submit">Sign out</button>
-  </form>
+  </div>
 {% endblock %}
