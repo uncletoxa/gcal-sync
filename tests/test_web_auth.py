@@ -112,7 +112,7 @@ def test_tenant_sync_passes_are_namespaced_and_isolated(tmp_path, monkeypatch):
 
     seen: list[set[str]] = []
 
-    def fake_run_sync_pass(cfg, db, clients, dry_run=False):
+    def fake_run_sync_pass(cfg, db, clients, dry_run=False, force_full=False):
         assert set(cfg.calendars.keys()) == set(clients.keys())
         seen.append(set(cfg.calendars.keys()))
         return {}

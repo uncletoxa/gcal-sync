@@ -417,3 +417,21 @@ def test_full_copy_description_change_triggers_mirror_update(db, fake_client):
 
     mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
     assert mirror["description"] == "v2"
+
+
+# A newly-added destination calendar never sees a source's pre-existing, unchanged
+# events until that source's next full resync (its sync token only reports *changes*)
+# -- force_full=True is the escape hatch for triggering that immediately.
+def test_new_destination_misses_unchanged_source_events_until_force_full(db, fake_client):
+    NEW_CAL = "new-dest-cal-id"
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    # Establishes workspace's sync token via a full resync, with only "personal" as a peer.
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+
+    # "new" is added as a peer without anything changing on workspace since that token.
+    cfg = _cfg(calendars={"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL, "new": NEW_CAL})
+    run_sync_pass(cfg, db, _clients(fake_client, "workspace", "personal", "new"))
+    assert active(fake_client.events_in(NEW_CAL)) == []
+
+    run_sync_pass(cfg, db, _clients(fake_client, "workspace", "personal", "new"), force_full=True)
+    assert len(active(fake_client.events_in(NEW_CAL))) == 1

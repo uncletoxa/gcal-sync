@@ -158,7 +158,7 @@ def load_account_credentials(db: Database, cfg: Config, account_row) -> Credenti
     return creds
 
 
-def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bool = False):
+def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bool = False, force_full: bool = False):
     """Run one sync pass across a single tenant's connected accounts (needs 2+).
 
     Namespaces the accounts via `tenant_account_key` so sync_engine.py's full-mesh
@@ -176,4 +176,4 @@ def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bo
         for source, dest in db.get_full_copy_pairs(tenant_id)
     )
     tenant_cfg = dataclasses.replace(cfg, calendars=tenant_calendars, full_copy_pairs=full_copy_pairs)
-    return run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run)
+    return run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run, force_full=force_full)

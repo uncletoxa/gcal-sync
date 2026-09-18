@@ -181,11 +181,14 @@ def _fetch_source_events(
     source_calendar_key: str,
     full_resync_interval_hours: float,
     sync_window_days: float,
+    force_full: bool = False,
 ) -> tuple[list[dict], "str | None", bool, datetime, datetime]:
     """Fetch one source calendar's changed events since the last pass (once per pass,
     regardless of how many destination calendars it fans out to)."""
     stored_token = db.get_sync_token(source_calendar_key)
-    force_full = stored_token is None or _full_resync_due(db, source_calendar_key, full_resync_interval_hours)
+    force_full = (
+        force_full or stored_token is None or _full_resync_due(db, source_calendar_key, full_resync_interval_hours)
+    )
     sync_token = None if force_full else stored_token
     window_start, window_end = _sync_window(sync_window_days)
 
@@ -349,6 +352,7 @@ def sync_all_pairs(
     sync_window_days: float = 14.0,
     dry_run: bool = False,
     full_copy_pairs: frozenset[tuple[str, str]] = frozenset(),
+    force_full: bool = False,
 ) -> dict[str, SyncStats]:
     """Mirror busy blocks between every ordered pair of configured calendars.
 
@@ -359,19 +363,25 @@ def sync_all_pairs(
     `full_copy_pairs` opts specific directed (source, dest) pairs into mirroring
     title/description/location instead of just a "Busy" placeholder; every pair
     not listed keeps the default busy-only behavior.
+
+    `force_full` re-fetches every source calendar in full regardless of its
+    sync-token/last-full-sync bookkeeping — needed e.g. right after a new
+    destination calendar is connected, since that destination has never seen any
+    of the other calendars' pre-existing, unchanged events.
     """
     accounts = list(calendar_ids)
     pair_stats: dict[str, SyncStats] = {}
 
     for source_account in accounts:
         source_calendar_id = calendar_ids[source_account]
-        events, next_sync_token, force_full, window_start, window_end = _fetch_source_events(
+        events, next_sync_token, source_force_full, window_start, window_end = _fetch_source_events(
             clients[source_account],
             db,
             source_calendar_id=source_calendar_id,
             source_calendar_key=source_account,
             full_resync_interval_hours=full_resync_interval_hours,
             sync_window_days=sync_window_days,
+            force_full=force_full,
         )
 
         for dest_account in accounts:
@@ -379,7 +389,7 @@ def sync_all_pairs(
                 continue
             pair_stats[f"{source_account}->{dest_account}"] = propagate_to_destination(
                 events,
-                force_full,
+                source_force_full,
                 clients[dest_account],
                 db,
                 source_account=source_account,
@@ -394,7 +404,7 @@ def sync_all_pairs(
             )
 
         if not dry_run:
-            if force_full:
+            if source_force_full:
                 db.set_last_full_sync(source_account, datetime.now(timezone.utc).isoformat())
             if next_sync_token:
                 db.set_sync_token(source_account, next_sync_token)
@@ -407,8 +417,9 @@ def run_sync_pass(
     db: Database,
     clients: dict[str, CalendarClient],
     dry_run: bool = False,
+    force_full: bool = False,
 ):
-    log_event(logger, "sync_started", dry_run=dry_run, accounts=list(cfg.calendars))
+    log_event(logger, "sync_started", dry_run=dry_run, force_full=force_full, accounts=list(cfg.calendars))
 
     pair_stats = sync_all_pairs(
         clients,
@@ -418,6 +429,7 @@ def run_sync_pass(
         sync_window_days=cfg.sync_window_days,
         dry_run=dry_run,
         full_copy_pairs=cfg.full_copy_pairs,
+        force_full=force_full,
     )
 
     log_event(logger, "sync_completed", **{key: vars(stats) for key, stats in pair_stats.items()})

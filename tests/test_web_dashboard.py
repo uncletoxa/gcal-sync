@@ -74,7 +74,7 @@ def test_sync_now_requires_two_accounts_and_triggers_sync_tenant(tmp_path, monke
     calls = []
     monkeypatch.setattr(
         web_auth, "sync_tenant",
-        lambda cfg, db, tid, accounts, dry_run=False: calls.append(tid),
+        lambda cfg, db, tid, accounts, dry_run=False, force_full=False: calls.append(tid),
     )
 
     resp = client.post("/sync")

@@ -145,7 +145,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         if len(accounts) < 2:
             return redirect(url_for("dashboard"))
         try:
-            web_auth.sync_tenant(cfg, db, tenant_id, accounts)
+            web_auth.sync_tenant(cfg, db, tenant_id, accounts, force_full=True)
         except AuthenticationError as exc:
             session["sync_error"] = str(exc)
         except Exception:
