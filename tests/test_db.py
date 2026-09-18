@@ -318,6 +318,54 @@ def test_pair_templates_are_independent_of_copy_mode_and_enabled(tmp_path):
     db.close()
 
 
+def test_pair_colors_default_to_empty_and_roundtrip(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    assert db.get_pair_colors(tenant["id"]) == {}
+
+    db.set_pair_color(tenant["id"], "a", "b", "11")
+    assert db.get_pair_colors(tenant["id"]) == {("a", "b"): "11"}
+
+    # Only the reverse direction is queried here, confirming colors are directional.
+    assert ("b", "a") not in db.get_pair_colors(tenant["id"])
+
+    db.set_pair_color(tenant["id"], "a", "b", None)
+    assert db.get_pair_colors(tenant["id"]) == {}
+
+    db.close()
+
+
+def test_pair_colors_are_isolated_per_tenant(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    t1 = db.get_or_create_tenant("t1@example.com")
+    t2 = db.get_or_create_tenant("t2@example.com")
+
+    db.set_pair_color(t1["id"], "a", "b", "7")
+
+    assert db.get_pair_colors(t1["id"]) == {("a", "b"): "7"}
+    assert db.get_pair_colors(t2["id"]) == {}
+
+    db.close()
+
+
+def test_pair_colors_are_independent_of_copy_mode_enabled_and_templates(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    db.set_pair_copy_mode(tenant["id"], "a", "b", "full")
+    db.set_pair_enabled(tenant["id"], "a", "b", False)
+    db.set_pair_templates(tenant["id"], "a", "b", "{title}", "{description}")
+    db.set_pair_color(tenant["id"], "a", "b", "9")
+
+    assert db.get_full_copy_pairs(tenant["id"]) == {("a", "b")}
+    assert db.get_disabled_pairs(tenant["id"]) == {("a", "b")}
+    assert db.get_pair_templates(tenant["id"]) == {("a", "b"): ("{title}", "{description}")}
+    assert db.get_pair_colors(tenant["id"]) == {("a", "b"): "9"}
+
+    db.close()
+
+
 def test_get_connected_account_returns_none_for_wrong_tenant(tmp_path):
     db = Database(str(tmp_path / "s.sqlite3"))
     t1 = db.get_or_create_tenant("t1@example.com")
@@ -392,11 +440,15 @@ def test_migration_adds_new_columns_to_pre_existing_database(tmp_path):
     assert db.get_full_copy_pairs(1) == {("a", "b")}  # pre-existing row survives
     assert db.get_disabled_pairs(1) == set()  # new column, added enabled=1 default
     assert db.get_pair_templates(1) == {}  # new columns, added with NULL default
+    assert db.get_pair_colors(1) == {}  # new column, added with NULL default
 
     db.set_pair_enabled(1, "a", "b", False)
     assert db.get_disabled_pairs(1) == {("a", "b")}
 
     db.set_pair_templates(1, "a", "b", "{title}", None)
     assert db.get_pair_templates(1) == {("a", "b"): ("{title}", None)}
+
+    db.set_pair_color(1, "a", "b", "11")
+    assert db.get_pair_colors(1) == {("a", "b"): "11"}
 
     db.close()

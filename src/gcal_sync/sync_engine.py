@@ -55,6 +55,7 @@ def event_signature(
     title_template: str | None = None,
     description_template: str | None = None,
     calendar_name: str | None = None,
+    color_id: str | None = None,
 ) -> str:
     """A stable fingerprint of the parts of the event we mirror.
 
@@ -64,9 +65,10 @@ def event_signature(
     The template strings and calendar name are fingerprinted too, so editing
     a pair's template (or renaming a calendar used via {calendar}) also
     forces an update on the next full-resync pass, without needing the
-    source event itself to change.
+    source event itself to change. `color_id` is fingerprinted unconditionally
+    since it applies regardless of full_copy.
     """
-    fields = {"start": event.get("start"), "end": event.get("end")}
+    fields = {"start": event.get("start"), "end": event.get("end"), "color_id": color_id}
     if full_copy:
         fields["summary"] = event.get("summary")
         fields["description"] = event.get("description")
@@ -98,6 +100,7 @@ def build_mirror_body(
     title_template: str | None = None,
     description_template: str | None = None,
     calendar_name: str | None = None,
+    color_id: str | None = None,
 ) -> dict:
     raw_title = event.get("summary") or ""
     raw_description = event.get("description", "")
@@ -127,6 +130,8 @@ def build_mirror_body(
             }
         },
     }
+    if color_id:
+        body["colorId"] = color_id
     if full_copy:
         description = raw_description
         if description_template:
@@ -298,6 +303,7 @@ def propagate_to_destination(
     title_template: str | None = None,
     description_template: str | None = None,
     calendar_name: str | None = None,
+    color_id: str | None = None,
 ) -> SyncStats:
     """Mirror one source calendar's busy blocks into one destination calendar."""
     stats = SyncStats()
@@ -337,10 +343,10 @@ def propagate_to_destination(
                 log_event(logger, "event_skipped", source=source_calendar_key, dest=dest_account)
             continue
 
-        signature = event_signature(event, full_copy, title_template, description_template, calendar_name)
+        signature = event_signature(event, full_copy, title_template, description_template, calendar_name, color_id)
         body = build_mirror_body(
             event, source_account, source_calendar_id, full_copy,
-            title_template, description_template, calendar_name,
+            title_template, description_template, calendar_name, color_id,
         )
 
         if mapping is None or mapping["status"] != "active" or not mapping["dest_event_id"]:
@@ -361,6 +367,11 @@ def propagate_to_destination(
         elif mapping["source_signature"] != signature:
             if not dry_run:
                 dest_event_id = mapping["dest_event_id"]
+                if not color_id:
+                    # build_mirror_body omits "colorId" entirely when unset, which is right
+                    # for creation but would leave a previously-set color untouched on patch
+                    # (Google's patch semantics: omitted = unchanged, explicit null = cleared).
+                    body["colorId"] = None
                 patched = dest_client.patch_event(dest_calendar_id, dest_event_id, body)
                 if patched is None:
                     # The destination copy was deleted out from under us (e.g. manually,
@@ -419,6 +430,7 @@ def heal_deleted_mirrors(
     full_copy_pairs: frozenset[tuple[str, str]],
     pair_templates: dict[tuple[str, str], tuple[str | None, str | None]],
     calendar_display_names: dict[str, str],
+    pair_colors: dict[tuple[str, str], str | None],
 ) -> int:
     """Notice this account's own mirror events that were deleted directly on its
     calendar (by the user, or anything else outside this tool) and recreate them.
@@ -459,10 +471,13 @@ def heal_deleted_mirrors(
         title_template, description_template = pair_templates.get(pair, (None, None))
         full_copy = pair in full_copy_pairs
         calendar_name = calendar_display_names.get(mapping["source_account"], mapping["source_account"])
-        signature = event_signature(source_event, full_copy, title_template, description_template, calendar_name)
+        color_id = pair_colors.get(pair)
+        signature = event_signature(
+            source_event, full_copy, title_template, description_template, calendar_name, color_id
+        )
         body = build_mirror_body(
             source_event, mapping["source_account"], mapping["source_calendar_id"], full_copy,
-            title_template, description_template, calendar_name,
+            title_template, description_template, calendar_name, color_id,
         )
         if not dry_run:
             created = clients[account].insert_event(calendar_id, body)
@@ -494,6 +509,7 @@ def sync_all_pairs(
     sync_window_overrides: dict[str, float] | None = None,
     pair_templates: dict[tuple[str, str], tuple[str | None, str | None]] | None = None,
     calendar_display_names: dict[str, str] | None = None,
+    pair_colors: dict[tuple[str, str], str | None] | None = None,
     force_full: bool = False,
 ) -> dict[str, SyncStats]:
     """Mirror busy blocks between every ordered pair of configured calendars.
@@ -521,6 +537,11 @@ def sync_all_pairs(
     fill the {calendar} template placeholder when that account is the source;
     accounts not present fall back to their account name.
 
+    `pair_colors` maps a (source, dest) pair to a Google Calendar eventColor id
+    applied to mirrored events for that pair, regardless of busy-only/full-copy
+    mode; a pair absent here leaves the destination's default event color
+    untouched.
+
     `force_full` re-fetches every source calendar in full regardless of its
     sync-token/last-full-sync bookkeeping — needed e.g. right after a new
     destination calendar is connected, since that destination has never seen any
@@ -531,6 +552,7 @@ def sync_all_pairs(
     sync_window_overrides = sync_window_overrides or {}
     pair_templates = pair_templates or {}
     calendar_display_names = calendar_display_names or {}
+    pair_colors = pair_colors or {}
 
     for source_account in accounts:
         source_calendar_id = calendar_ids[source_account]
@@ -559,6 +581,7 @@ def sync_all_pairs(
             full_copy_pairs=full_copy_pairs,
             pair_templates=pair_templates,
             calendar_display_names=calendar_display_names,
+            pair_colors=pair_colors,
         )
 
         for dest_account in accounts:
@@ -567,6 +590,7 @@ def sync_all_pairs(
             if (source_account, dest_account) in disabled_pairs:
                 continue
             title_template, description_template = pair_templates.get((source_account, dest_account), (None, None))
+            color_id = pair_colors.get((source_account, dest_account))
             pair_stats[f"{source_account}->{dest_account}"] = propagate_to_destination(
                 events,
                 source_force_full,
@@ -584,6 +608,7 @@ def sync_all_pairs(
                 title_template=title_template,
                 description_template=description_template,
                 calendar_name=calendar_display_names.get(source_account, source_account),
+                color_id=color_id,
             )
 
         if not dry_run:
@@ -616,6 +641,7 @@ def run_sync_pass(
         sync_window_overrides=cfg.sync_window_overrides,
         pair_templates=cfg.pair_templates,
         calendar_display_names=cfg.calendar_display_names,
+        pair_colors=cfg.pair_colors,
         force_full=force_full,
     )
 

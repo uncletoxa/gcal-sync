@@ -188,6 +188,10 @@ def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bo
         (tenant_account_key(tenant_id, source), tenant_account_key(tenant_id, dest)): templates
         for (source, dest), templates in db.get_pair_templates(tenant_id).items()
     }
+    pair_colors = {
+        (tenant_account_key(tenant_id, source), tenant_account_key(tenant_id, dest)): color_id
+        for (source, dest), color_id in db.get_pair_colors(tenant_id).items()
+    }
     tenant_cfg = dataclasses.replace(
         cfg,
         calendars=tenant_calendars,
@@ -196,5 +200,6 @@ def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bo
         sync_window_overrides=sync_window_overrides,
         pair_templates=pair_templates,
         calendar_display_names=calendar_display_names,
+        pair_colors=pair_colors,
     )
     return run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run, force_full=force_full)

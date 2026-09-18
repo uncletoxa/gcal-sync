@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS pair_settings (
     enabled INTEGER NOT NULL DEFAULT 1,
     title_template TEXT,
     description_template TEXT,
+    color_id TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (tenant_id, source_account_label, dest_account_label)
 );
@@ -100,6 +101,8 @@ class Database:
             self._conn.execute("ALTER TABLE pair_settings ADD COLUMN title_template TEXT")
         if "description_template" not in pair_columns:
             self._conn.execute("ALTER TABLE pair_settings ADD COLUMN description_template TEXT")
+        if "color_id" not in pair_columns:
+            self._conn.execute("ALTER TABLE pair_settings ADD COLUMN color_id TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -415,5 +418,35 @@ class Database:
                 updated_at = excluded.updated_at
             """,
             (tenant_id, source_account_label, dest_account_label, title_template, description_template, _now()),
+        )
+        self._conn.commit()
+
+
+    def get_pair_colors(self, tenant_id: int) -> dict[tuple[str, str], Optional[str]]:
+        """Directed (source_label, dest_label) -> Google Calendar eventColor id applied
+        to mirrored events for that pair; pairs absent here leave the destination
+        calendar's default event color untouched."""
+        rows = self._conn.execute(
+            """
+            SELECT source_account_label, dest_account_label, color_id FROM pair_settings
+            WHERE tenant_id = ? AND color_id IS NOT NULL
+            """,
+            (tenant_id,),
+        ).fetchall()
+        return {(row["source_account_label"], row["dest_account_label"]): row["color_id"] for row in rows}
+
+    def set_pair_color(
+        self, tenant_id: int, source_account_label: str, dest_account_label: str, color_id: Optional[str]
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO pair_settings (
+                tenant_id, source_account_label, dest_account_label, color_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, source_account_label, dest_account_label) DO UPDATE SET
+                color_id = excluded.color_id,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, source_account_label, dest_account_label, color_id, _now()),
         )
         self._conn.commit()

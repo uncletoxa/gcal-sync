@@ -54,6 +54,12 @@ class Config:
     # placeholder when that account is a sync source. Populated per-tenant from
     # connected_accounts by web_auth.sync_tenant; not configurable via .env.
     calendar_display_names: dict[str, str] = field(default_factory=dict)
+    # Per-pair (source, dest) Google Calendar eventColor id (e.g. "11" for Tomato) applied
+    # to mirrored events for that pair, regardless of busy-only/full-copy mode; a pair
+    # absent here leaves the destination calendar's default event color untouched.
+    # Populated per-tenant from pair_settings by web_auth.sync_tenant; not configurable
+    # via .env.
+    pair_colors: dict[tuple[str, str], Optional[str]] = field(default_factory=dict)
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:

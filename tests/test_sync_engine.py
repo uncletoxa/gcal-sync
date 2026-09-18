@@ -17,6 +17,7 @@ def _cfg(
     sync_window_overrides=None,
     pair_templates=None,
     calendar_display_names=None,
+    pair_colors=None,
 ):
     return SimpleNamespace(
         calendars=calendars or {"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL},
@@ -27,6 +28,7 @@ def _cfg(
         sync_window_overrides=sync_window_overrides or {},
         pair_templates=pair_templates or {},
         calendar_display_names=calendar_display_names or {},
+        pair_colors=pair_colors or {},
     )
 
 
@@ -573,6 +575,73 @@ def test_template_change_triggers_mirror_update_on_force_full(db, fake_client):
 
     mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
     assert mirror["summary"] == "Busy travelling: Team sync"
+
+
+# -- event color --------------------------------------------------------------
+
+def test_pair_color_applies_to_busy_only_mirror(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    cfg = _cfg(pair_colors={("workspace", "personal"): "11"})
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["colorId"] == "11"
+
+
+def test_pair_color_applies_to_full_copy_mirror(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11), summary="Team sync"))
+    cfg = _cfg(
+        full_copy_pairs=frozenset({("workspace", "personal")}),
+        pair_colors={("workspace", "personal"): "7"},
+    )
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["colorId"] == "7"
+
+
+def test_no_pair_color_leaves_colorid_unset(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    cfg = _cfg()
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert "colorId" not in mirror
+
+
+def test_pair_color_change_triggers_mirror_update_on_force_full(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    cfg = _cfg(pair_colors={("workspace", "personal"): "11"})
+    run_sync_pass(cfg, db, _clients(fake_client))
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["colorId"] == "11"
+
+    # The source event itself never changes — only the color does. Without force_full
+    # this wouldn't be picked up (no sync-token delta), so this exercises the escape hatch.
+    cfg = _cfg(pair_colors={("workspace", "personal"): "7"})
+    run_sync_pass(cfg, db, _clients(fake_client), force_full=True)
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["colorId"] == "7"
+
+
+def test_clearing_pair_color_resets_mirror_to_default_on_force_full(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    cfg = _cfg(pair_colors={("workspace", "personal"): "11"})
+    run_sync_pass(cfg, db, _clients(fake_client))
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["colorId"] == "11"
+
+    # Clearing back to "Default" must explicitly null the field on patch — Google's PATCH
+    # semantics leave omitted fields untouched, so simply dropping the key wouldn't revert it.
+    cfg = _cfg()
+    run_sync_pass(cfg, db, _clients(fake_client), force_full=True)
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror.get("colorId") is None
 
 
 # A newly-added destination calendar never sees a source's pre-existing, unchanged

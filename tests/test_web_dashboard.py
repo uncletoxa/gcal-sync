@@ -415,3 +415,92 @@ def test_set_pair_template_requires_login(tmp_path):
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/")
     db.close()
+
+
+def test_set_pair_color_persists_and_reflects_on_incoming_side(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    for label in ("a@example.com", "b@example.com"):
+        db.upsert_connected_account(
+            tenant_id=tenant_id, account_label=label,
+            google_email=label, calendar_id=label, credentials_json="cipher",
+        )
+    # a -> b's color is only editable/visible from b's page — the incoming side.
+    dest_account_id = _account_id(db, tenant_id, "b@example.com")
+
+    resp = client.post(
+        "/pairs/color",
+        data={
+            "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
+            "color_id": "11", "return_account_id": str(dest_account_id),
+        },
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+    assert db.get_pair_colors(tenant_id) == {("a@example.com", "b@example.com"): "11"}
+
+    # Clearing back to "Default" removes the entry entirely.
+    client.post(
+        "/pairs/color",
+        data={
+            "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
+            "color_id": "", "return_account_id": str(dest_account_id),
+        },
+    )
+    assert db.get_pair_colors(tenant_id) == {}
+    db.close()
+
+
+def test_set_pair_color_rejects_unknown_color_id(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    for label in ("a@example.com", "b@example.com"):
+        db.upsert_connected_account(
+            tenant_id=tenant_id, account_label=label,
+            google_email=label, calendar_id=label, credentials_json="cipher",
+        )
+
+    resp = client.post(
+        "/pairs/color",
+        data={
+            "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
+            "color_id": "99",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert db.get_pair_colors(tenant_id) == {}
+    db.close()
+
+
+def test_set_pair_color_rejects_unknown_account(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    db.upsert_connected_account(
+        tenant_id=tenant_id, account_label="a@example.com",
+        google_email="a@example.com", calendar_id="a@example.com", credentials_json="cipher",
+    )
+
+    resp = client.post(
+        "/pairs/color",
+        data={
+            "source_account_label": "a@example.com", "dest_account_label": "ghost@example.com",
+            "color_id": "11",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert db.get_pair_colors(tenant_id) == {}
+    db.close()
+
+
+def test_set_pair_color_requires_login(tmp_path):
+    client, db = _client(tmp_path)
+    resp = client.post(
+        "/pairs/color",
+        data={"source_account_label": "a", "dest_account_label": "b", "color_id": "11"},
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/")
+    db.close()

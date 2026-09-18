@@ -13,6 +13,23 @@ from ..logging_config import log_event, setup_logging
 
 logger = logging.getLogger(__name__)
 
+# Google Calendar's fixed eventColor palette (id -> (name, hex)), used to color mirrored
+# events for a pair. Not exposed by any API the app calls — Google's client libraries hardcode
+# the same 11 colors, so we do too.
+EVENT_COLORS = {
+    "1": ("Lavender", "#7986cb"),
+    "2": ("Sage", "#33b679"),
+    "3": ("Grape", "#8e24aa"),
+    "4": ("Flamingo", "#e67c73"),
+    "5": ("Banana", "#f6c026"),
+    "6": ("Tangerine", "#f5511d"),
+    "7": ("Peacock", "#039be5"),
+    "8": ("Graphite", "#616161"),
+    "9": ("Blueberry", "#3f51b5"),
+    "10": ("Basil", "#0b8043"),
+    "11": ("Tomato", "#d60000"),
+}
+
 
 def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
     cfg = cfg or load_config(require_calendars=False)
@@ -134,6 +151,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         full_copy_pairs = db.get_full_copy_pairs(tenant_id)
         disabled_pairs = db.get_disabled_pairs(tenant_id)
         pair_templates = db.get_pair_templates(tenant_id)
+        pair_colors = db.get_pair_colors(tenant_id)
         other_accounts = [acc for acc in accounts if acc["id"] != account_id]
         incoming = [
             {
@@ -147,6 +165,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 "description_template": pair_templates.get(
                     (other["account_label"], account["account_label"]), (None, None)
                 )[1] or "",
+                "color_id": pair_colors.get((other["account_label"], account["account_label"])) or "",
             }
             for other in other_accounts
         ]
@@ -164,6 +183,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             },
             default_sync_window_days=cfg.sync_window_days,
             incoming=incoming,
+            event_colors=EVENT_COLORS,
             sync_window_error=session.pop("sync_window_error", None),
             display_name_error=session.pop("display_name_error", None),
         )
@@ -262,6 +282,26 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         log_event(
             logger, "web_pair_template_changed",
             tenant_id=tenant_id, source=source_label, dest=dest_label,
+        )
+        return _redirect_after_pair_change()
+
+    @app.post("/pairs/color")
+    def set_pair_color():
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        source_label = request.form.get("source_account_label", "")
+        dest_label = request.form.get("dest_account_label", "")
+        valid_labels = {acc["account_label"] for acc in db.list_connected_accounts(tenant_id)}
+        if source_label not in valid_labels or dest_label not in valid_labels:
+            abort(400)
+        color_id = request.form.get("color_id", "").strip() or None
+        if color_id is not None and color_id not in EVENT_COLORS:
+            abort(400)
+        db.set_pair_color(tenant_id, source_label, dest_label, color_id)
+        log_event(
+            logger, "web_pair_color_changed",
+            tenant_id=tenant_id, source=source_label, dest=dest_label, color_id=color_id,
         )
         return _redirect_after_pair_change()
 

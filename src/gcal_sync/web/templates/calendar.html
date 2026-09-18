@@ -44,8 +44,9 @@
       mirror a title and description built from {title}, {description}, and {calendar}
       placeholders — leave a template blank to pass that field through unchanged.
       Location is always included in template mode. Attendees are never copied either
-      way. Disabling a connection stops future syncing but does not remove Busy blocks
-      already created.
+      way. The event color applies in both modes — leave it on "Default" to use the
+      destination calendar's normal color. Disabling a connection stops future syncing
+      but does not remove Busy blocks already created.
     </p>
 
     <h2 style="margin-top: 2rem;">Incoming connections</h2>
@@ -76,6 +77,24 @@
           {% endif %}
         </div>
       </div>
+      {% if pair.enabled %}
+        <form method="post" action="{{ url_for('set_pair_color') }}" class="inline" style="margin: 0.3em 0 0.6em;">
+          <input type="hidden" name="source_account_label" value="{{ pair.label }}">
+          <input type="hidden" name="dest_account_label" value="{{ account.label }}">
+          <input type="hidden" name="return_account_id" value="{{ account.id }}">
+          <label class="muted" for="color-{{ pair.label }}">Event color:</label>
+          <select
+            id="color-{{ pair.label }}" name="color_id"
+            onchange="this.form.submit()"
+            style="border-left: 0.8em solid {{ event_colors[pair.color_id][1] if pair.color_id else '#ccc' }};"
+          >
+            <option value="" {{ "selected" if not pair.color_id }}>Default</option>
+            {% for id, (name, hex) in event_colors.items() %}
+              <option value="{{ id }}" {{ "selected" if pair.color_id == id }}>{{ name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      {% endif %}
       {% if pair.enabled and pair.full_copy %}
         <form method="post" action="{{ url_for('set_pair_template') }}" style="margin: 0.5em 0 1em;">
           <input type="hidden" name="source_account_label" value="{{ pair.label }}">
