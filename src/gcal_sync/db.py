@@ -70,6 +70,10 @@ class Database:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        # Multiple processes (poller + gunicorn web workers) share this database file;
+        # without this, a writer that finds the file locked fails immediately instead
+        # of retrying, surfacing as a spurious "database is locked" error.
+        self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.executescript(SCHEMA)
         self._migrate()
         self._conn.commit()

@@ -1,6 +1,16 @@
 from gcal_sync.db import Database
 
 
+def test_busy_timeout_is_configured(tmp_path):
+    """Multiple processes (poller + gunicorn workers) share one database file; a writer
+    that finds it locked must retry instead of failing immediately."""
+    db = Database(str(tmp_path / "s.sqlite3"))
+
+    assert db._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 10000
+
+    db.close()
+
+
 def test_upsert_mapping_insert_update_and_delete(tmp_path):
     db = Database(str(tmp_path / "s.sqlite3"))
 
