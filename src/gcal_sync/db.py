@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS connected_accounts (
     google_email TEXT NOT NULL,
     calendar_id TEXT NOT NULL,
     credentials_json TEXT NOT NULL,
+    sync_window_days REAL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(tenant_id, account_label)
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS pair_settings (
     source_account_label TEXT NOT NULL,
     dest_account_label TEXT NOT NULL,
     copy_mode TEXT NOT NULL DEFAULT 'busy_only',
+    enabled INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (tenant_id, source_account_label, dest_account_label)
 );
@@ -69,7 +71,19 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a table's initial CREATE TABLE IF NOT EXISTS,
+        which only takes effect for brand-new databases."""
+        account_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(connected_accounts)")}
+        if "sync_window_days" not in account_columns:
+            self._conn.execute("ALTER TABLE connected_accounts ADD COLUMN sync_window_days REAL")
+
+        pair_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(pair_settings)")}
+        if "enabled" not in pair_columns:
+            self._conn.execute("ALTER TABLE pair_settings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
 
     def close(self) -> None:
         self._conn.close()
@@ -240,6 +254,24 @@ class Database:
             (tenant_id,),
         ).fetchall()
 
+
+    def get_connected_account(self, tenant_id: int, account_id: int) -> Optional[sqlite3.Row]:
+        return self._conn.execute(
+            "SELECT * FROM connected_accounts WHERE id = ? AND tenant_id = ?",
+            (account_id, tenant_id),
+        ).fetchone()
+
+    def set_account_sync_window(
+        self, tenant_id: int, account_id: int, sync_window_days: Optional[float]
+    ) -> None:
+        """Per-calendar override for how many days ahead to sync when this account is the
+        source; None reverts to the tenant/instance default (Config.sync_window_days)."""
+        self._conn.execute(
+            "UPDATE connected_accounts SET sync_window_days = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+            (sync_window_days, _now(), account_id, tenant_id),
+        )
+        self._conn.commit()
+
     def delete_connected_account(self, tenant_id: int, account_id: int) -> None:
         self._conn.execute(
             "DELETE FROM connected_accounts WHERE id = ? AND tenant_id = ?",
@@ -277,5 +309,33 @@ class Database:
                 updated_at = excluded.updated_at
             """,
             (tenant_id, source_account_label, dest_account_label, copy_mode, _now()),
+        )
+        self._conn.commit()
+
+
+    def get_disabled_pairs(self, tenant_id: int) -> set[tuple[str, str]]:
+        """Directed (source_label, dest_label) pairs excluded from syncing entirely."""
+        rows = self._conn.execute(
+            """
+            SELECT source_account_label, dest_account_label FROM pair_settings
+            WHERE tenant_id = ? AND enabled = 0
+            """,
+            (tenant_id,),
+        ).fetchall()
+        return {(row["source_account_label"], row["dest_account_label"]) for row in rows}
+
+    def set_pair_enabled(
+        self, tenant_id: int, source_account_label: str, dest_account_label: str, enabled: bool
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO pair_settings (
+                tenant_id, source_account_label, dest_account_label, enabled, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, source_account_label, dest_account_label) DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, source_account_label, dest_account_label, int(enabled), _now()),
         )
         self._conn.commit()

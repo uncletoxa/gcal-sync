@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ account.email }} — GCal Sync{% endblock %}
+{% block body %}
+  <p><a href="{{ url_for('dashboard') }}">&larr; All calendars</a></p>
+  <h1>{{ account.email }}</h1>
+  <p class="muted">
+    {% if account.last_synced %}Last synced {{ account.last_synced }}{% else %}Not yet synced{% endif %}
+  </p>
+
+  {% if sync_window_error %}
+    <p class="error">{{ sync_window_error }}</p>
+  {% endif %}
+
+  <h2 style="margin-top: 2rem;">Sync window</h2>
+  <p class="muted">
+    How many days ahead to look for events when this calendar is the source of a sync.
+    Leave blank to use the instance default ({{ default_sync_window_days }} days).
+  </p>
+  <form method="post" action="{{ url_for('set_calendar_sync_window', account_id=account.id) }}">
+    <input
+      type="number" step="any" min="0" name="sync_window_days"
+      placeholder="{{ default_sync_window_days }}"
+      value="{{ account.sync_window_days if account.sync_window_days is not none else '' }}"
+    >
+    <button class="btn-secondary" type="submit">Save</button>
+  </form>
+
+  {% if outgoing or incoming %}
+    <p class="muted" style="margin-top: 2rem;">
+      By default only busy/free blocks are mirrored. Enable full copy to also mirror
+      title, description, and location for a specific direction. Attendees are never
+      copied either way. Disabling a direction stops future syncing but does not remove
+      Busy blocks already created.
+    </p>
+  {% endif %}
+
+  {% if outgoing %}
+    <h2>Outgoing — this calendar &rarr; others</h2>
+    {% for pair in outgoing %}
+      <div class="account">
+        <div>
+          &rarr; {{ pair.email }}:
+          <strong>{{ "Disabled" if not pair.enabled else ("Full copy" if pair.full_copy else "Busy only") }}</strong>
+        </div>
+        <div>
+          <form class="inline" method="post" action="{{ url_for('toggle_pair_enabled') }}">
+            <input type="hidden" name="source_account_label" value="{{ account.label }}">
+            <input type="hidden" name="dest_account_label" value="{{ pair.label }}">
+            <input type="hidden" name="enabled" value="{{ '0' if pair.enabled else '1' }}">
+            <input type="hidden" name="return_account_id" value="{{ account.id }}">
+            <button class="btn-secondary" type="submit">{{ "Disable" if pair.enabled else "Enable" }}</button>
+          </form>
+          {% if pair.enabled %}
+            <form class="inline" method="post" action="{{ url_for('toggle_pair_copy_mode') }}">
+              <input type="hidden" name="source_account_label" value="{{ account.label }}">
+              <input type="hidden" name="dest_account_label" value="{{ pair.label }}">
+              <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
+              <input type="hidden" name="return_account_id" value="{{ account.id }}">
+              <button class="btn-secondary" type="submit">
+                {{ "Disable full copy" if pair.full_copy else "Enable full copy" }}
+              </button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  {% if incoming %}
+    <h2 style="margin-top: 2rem;">Incoming — others &rarr; this calendar</h2>
+    {% for pair in incoming %}
+      <div class="account">
+        <div>
+          {{ pair.email }} &rarr;:
+          <strong>{{ "Disabled" if not pair.enabled else ("Full copy" if pair.full_copy else "Busy only") }}</strong>
+        </div>
+        <div>
+          <form class="inline" method="post" action="{{ url_for('toggle_pair_enabled') }}">
+            <input type="hidden" name="source_account_label" value="{{ pair.label }}">
+            <input type="hidden" name="dest_account_label" value="{{ account.label }}">
+            <input type="hidden" name="enabled" value="{{ '0' if pair.enabled else '1' }}">
+            <input type="hidden" name="return_account_id" value="{{ account.id }}">
+            <button class="btn-secondary" type="submit">{{ "Disable" if pair.enabled else "Enable" }}</button>
+          </form>
+          {% if pair.enabled %}
+            <form class="inline" method="post" action="{{ url_for('toggle_pair_copy_mode') }}">
+              <input type="hidden" name="source_account_label" value="{{ pair.label }}">
+              <input type="hidden" name="dest_account_label" value="{{ account.label }}">
+              <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
+              <input type="hidden" name="return_account_id" value="{{ account.id }}">
+              <button class="btn-secondary" type="submit">
+                {{ "Disable full copy" if pair.full_copy else "Enable full copy" }}
+              </button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  {% if not outgoing and not incoming %}
+    <p class="muted" style="margin-top: 2rem;">
+      Connect at least one more calendar to configure sync directions for this one.
+    </p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('disconnect', account_id=account.id) }}"
+        style="margin-top: 2rem;"
+        onsubmit="return confirm('Disconnect this calendar? Already-created Busy blocks on your other calendars won\'t be removed automatically.');">
+    <button class="btn-secondary" type="submit">Disconnect this calendar</button>
+  </form>
+{% endblock %}

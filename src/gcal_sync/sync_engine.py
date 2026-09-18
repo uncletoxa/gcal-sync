@@ -352,6 +352,8 @@ def sync_all_pairs(
     sync_window_days: float = 14.0,
     dry_run: bool = False,
     full_copy_pairs: frozenset[tuple[str, str]] = frozenset(),
+    disabled_pairs: frozenset[tuple[str, str]] = frozenset(),
+    sync_window_overrides: dict[str, float] | None = None,
     force_full: bool = False,
 ) -> dict[str, SyncStats]:
     """Mirror busy blocks between every ordered pair of configured calendars.
@@ -364,6 +366,13 @@ def sync_all_pairs(
     title/description/location instead of just a "Busy" placeholder; every pair
     not listed keeps the default busy-only behavior.
 
+    `disabled_pairs` excludes specific directed (source, dest) pairs from syncing
+    entirely — no propagation happens and no pair_stats entry is produced for them.
+
+    `sync_window_overrides` maps an account name to a per-account sync_window_days
+    override, used when that account is the source; accounts not present fall back
+    to `sync_window_days`.
+
     `force_full` re-fetches every source calendar in full regardless of its
     sync-token/last-full-sync bookkeeping — needed e.g. right after a new
     destination calendar is connected, since that destination has never seen any
@@ -371,21 +380,25 @@ def sync_all_pairs(
     """
     accounts = list(calendar_ids)
     pair_stats: dict[str, SyncStats] = {}
+    sync_window_overrides = sync_window_overrides or {}
 
     for source_account in accounts:
         source_calendar_id = calendar_ids[source_account]
+        source_sync_window_days = sync_window_overrides.get(source_account, sync_window_days)
         events, next_sync_token, source_force_full, window_start, window_end = _fetch_source_events(
             clients[source_account],
             db,
             source_calendar_id=source_calendar_id,
             source_calendar_key=source_account,
             full_resync_interval_hours=full_resync_interval_hours,
-            sync_window_days=sync_window_days,
+            sync_window_days=source_sync_window_days,
             force_full=force_full,
         )
 
         for dest_account in accounts:
             if dest_account == source_account:
+                continue
+            if (source_account, dest_account) in disabled_pairs:
                 continue
             pair_stats[f"{source_account}->{dest_account}"] = propagate_to_destination(
                 events,
@@ -429,6 +442,8 @@ def run_sync_pass(
         sync_window_days=cfg.sync_window_days,
         dry_run=dry_run,
         full_copy_pairs=cfg.full_copy_pairs,
+        disabled_pairs=cfg.disabled_pairs,
+        sync_window_overrides=cfg.sync_window_overrides,
         force_full=force_full,
     )
 

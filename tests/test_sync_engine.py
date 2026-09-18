@@ -13,12 +13,16 @@ def _cfg(
     sync_window_days: float = 14.0,
     calendars=None,
     full_copy_pairs=frozenset(),
+    disabled_pairs=frozenset(),
+    sync_window_overrides=None,
 ):
     return SimpleNamespace(
         calendars=calendars or {"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL},
         full_resync_interval_hours=full_resync_interval_hours,
         sync_window_days=sync_window_days,
         full_copy_pairs=full_copy_pairs,
+        disabled_pairs=disabled_pairs,
+        sync_window_overrides=sync_window_overrides or {},
     )
 
 
@@ -435,3 +439,43 @@ def test_new_destination_misses_unchanged_source_events_until_force_full(db, fak
 
     run_sync_pass(cfg, db, _clients(fake_client, "workspace", "personal", "new"), force_full=True)
     assert len(active(fake_client.events_in(NEW_CAL))) == 1
+
+
+
+def test_disabled_pair_is_not_synced(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    cfg = _cfg(disabled_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    assert active(fake_client.events_in(PERSONAL_CAL)) == []
+
+
+def test_disabled_pair_is_directional(db, fake_client):
+    fake_client.seed_event(PERSONAL_CAL, make_event("p1", _dt(1, 10), _dt(1, 11)))
+    # workspace -> personal is disabled; personal -> workspace is untouched.
+    cfg = _cfg(disabled_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    assert len(active(fake_client.events_in(WORKSPACE_CAL))) == 1
+
+
+def test_sync_window_override_applies_per_source_account(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(5, 10), _dt(5, 11)))
+    # Instance default is 1 day (too short to see the day-5 event); workspace overrides to 7.
+    cfg = _cfg(sync_window_days=1, sync_window_overrides={"workspace": 7})
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    assert len(active(fake_client.events_in(PERSONAL_CAL))) == 1
+
+
+def test_sync_window_override_only_affects_overridden_account(db, fake_client):
+    fake_client.seed_event(PERSONAL_CAL, make_event("p1", _dt(5, 10), _dt(5, 11)))
+    # personal has no override, so it still uses the 1-day instance default.
+    cfg = _cfg(sync_window_days=1, sync_window_overrides={"workspace": 7})
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    assert active(fake_client.events_in(WORKSPACE_CAL)) == []

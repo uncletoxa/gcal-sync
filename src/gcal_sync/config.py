@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
@@ -37,6 +37,13 @@ class Config:
     # (title, description, location) instead of just a "Busy" placeholder. Every pair not
     # listed here keeps the default busy-only behavior.
     full_copy_pairs: frozenset[tuple[str, str]] = frozenset()
+    # Directed (source, dest) account-name pairs excluded from syncing entirely. Populated
+    # per-tenant from pair_settings by web_auth.sync_tenant; not configurable via .env.
+    disabled_pairs: frozenset[tuple[str, str]] = frozenset()
+    # Per-account overrides of sync_window_days, keyed by account name, for when that
+    # account acts as the sync source. Populated per-tenant from connected_accounts by
+    # web_auth.sync_tenant; not configurable via .env.
+    sync_window_overrides: dict[str, float] = field(default_factory=dict)
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:

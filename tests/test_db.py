@@ -184,3 +184,136 @@ def test_pair_copy_mode_is_isolated_per_tenant(tmp_path):
     assert db.get_full_copy_pairs(t2["id"]) == set()
 
     db.close()
+
+
+
+def test_pair_enabled_defaults_to_true_and_roundtrips(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    assert db.get_disabled_pairs(tenant["id"]) == set()
+
+    db.set_pair_enabled(tenant["id"], "alice@example.com", "alice@work.com", False)
+    assert db.get_disabled_pairs(tenant["id"]) == {("alice@example.com", "alice@work.com")}
+
+    db.set_pair_enabled(tenant["id"], "alice@example.com", "alice@work.com", True)
+    assert db.get_disabled_pairs(tenant["id"]) == set()
+
+    db.close()
+
+
+def test_pair_enabled_and_copy_mode_are_independent(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    db.set_pair_copy_mode(tenant["id"], "a", "b", "full")
+    db.set_pair_enabled(tenant["id"], "a", "b", False)
+
+    # Disabling a pair doesn't reset its copy mode, and vice versa.
+    assert db.get_full_copy_pairs(tenant["id"]) == {("a", "b")}
+    assert db.get_disabled_pairs(tenant["id"]) == {("a", "b")}
+
+    db.set_pair_enabled(tenant["id"], "a", "b", True)
+    assert db.get_full_copy_pairs(tenant["id"]) == {("a", "b")}
+    assert db.get_disabled_pairs(tenant["id"]) == set()
+
+    db.close()
+
+
+def test_account_sync_window_defaults_to_none_and_roundtrips(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+    db.upsert_connected_account(
+        tenant_id=tenant["id"], account_label="a", google_email="a@example.com",
+        calendar_id="cal", credentials_json="cipher",
+    )
+    account_id = db.list_connected_accounts(tenant["id"])[0]["id"]
+
+    assert db.get_connected_account(tenant["id"], account_id)["sync_window_days"] is None
+
+    db.set_account_sync_window(tenant["id"], account_id, 30.0)
+    assert db.get_connected_account(tenant["id"], account_id)["sync_window_days"] == 30.0
+
+    db.set_account_sync_window(tenant["id"], account_id, None)
+    assert db.get_connected_account(tenant["id"], account_id)["sync_window_days"] is None
+
+    db.close()
+
+
+def test_get_connected_account_returns_none_for_wrong_tenant(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    t1 = db.get_or_create_tenant("t1@example.com")
+    t2 = db.get_or_create_tenant("t2@example.com")
+    db.upsert_connected_account(
+        tenant_id=t1["id"], account_label="a", google_email="a@example.com",
+        calendar_id="cal", credentials_json="cipher",
+    )
+    account_id = db.list_connected_accounts(t1["id"])[0]["id"]
+
+    assert db.get_connected_account(t2["id"], account_id) is None
+    assert db.get_connected_account(t1["id"], account_id) is not None
+
+    db.close()
+
+
+def test_migration_adds_new_columns_to_pre_existing_database(tmp_path):
+    """A database created before sync_window_days/enabled existed must upgrade in place
+    without losing data, since this runs against gcal-sync's real deployed database."""
+    import sqlite3
+
+    path = str(tmp_path / "old.sqlite3")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE tenants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE connected_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+            account_label TEXT NOT NULL,
+            google_email TEXT NOT NULL,
+            calendar_id TEXT NOT NULL,
+            credentials_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(tenant_id, account_label)
+        );
+        CREATE TABLE pair_settings (
+            tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+            source_account_label TEXT NOT NULL,
+            dest_account_label TEXT NOT NULL,
+            copy_mode TEXT NOT NULL DEFAULT 'busy_only',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (tenant_id, source_account_label, dest_account_label)
+        );
+        """
+    )
+    conn.execute("INSERT INTO tenants (id, email, created_at) VALUES (1, 'a@example.com', 'now')")
+    conn.execute(
+        "INSERT INTO connected_accounts "
+        "(id, tenant_id, account_label, google_email, calendar_id, credentials_json, created_at, updated_at) "
+        "VALUES (1, 1, 'a', 'a@example.com', 'cal', 'cipher', 'now', 'now')"
+    )
+    conn.execute(
+        "INSERT INTO pair_settings (tenant_id, source_account_label, dest_account_label, copy_mode, updated_at) "
+        "VALUES (1, 'a', 'b', 'full', 'now')"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+
+    account = db.get_connected_account(1, 1)
+    assert account["google_email"] == "a@example.com"  # pre-existing data survives
+    assert account["sync_window_days"] is None  # new column, added with NULL default
+
+    assert db.get_full_copy_pairs(1) == {("a", "b")}  # pre-existing row survives
+    assert db.get_disabled_pairs(1) == set()  # new column, added enabled=1 default
+
+    db.set_pair_enabled(1, "a", "b", False)
+    assert db.get_disabled_pairs(1) == {("a", "b")}
+
+    db.close()

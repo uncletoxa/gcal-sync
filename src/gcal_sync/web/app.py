@@ -113,28 +113,89 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             }
             for acc in accounts
         ]
-        full_copy_pairs = db.get_full_copy_pairs(tenant_id)
-        pairs = [
-            {
-                "source_label": source["account_label"],
-                "dest_label": dest["account_label"],
-                "source_email": source["google_email"],
-                "dest_email": dest["google_email"],
-                "full_copy": (source["account_label"], dest["account_label"]) in full_copy_pairs,
-            }
-            for source in accounts
-            for dest in accounts
-            if source["id"] != dest["id"]
-        ]
         return render_template(
             "dashboard.html",
             tenant_email=tenant["email"],
             accounts=rows,
-            pairs=pairs,
             needs_second_account=len(rows) < 2,
             sync_error=session.pop("sync_error", None),
             sync_success=session.pop("sync_success", None),
         )
+
+    @app.get("/calendars/<int:account_id>")
+    def calendar_detail(account_id: int):
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        account = db.get_connected_account(tenant_id, account_id)
+        if account is None:
+            abort(404)
+        accounts = db.list_connected_accounts(tenant_id)
+        full_copy_pairs = db.get_full_copy_pairs(tenant_id)
+        disabled_pairs = db.get_disabled_pairs(tenant_id)
+        other_accounts = [acc for acc in accounts if acc["id"] != account_id]
+        outgoing = [
+            {
+                "label": other["account_label"],
+                "email": other["google_email"],
+                "full_copy": (account["account_label"], other["account_label"]) in full_copy_pairs,
+                "enabled": (account["account_label"], other["account_label"]) not in disabled_pairs,
+            }
+            for other in other_accounts
+        ]
+        incoming = [
+            {
+                "label": other["account_label"],
+                "email": other["google_email"],
+                "full_copy": (other["account_label"], account["account_label"]) in full_copy_pairs,
+                "enabled": (other["account_label"], account["account_label"]) not in disabled_pairs,
+            }
+            for other in other_accounts
+        ]
+        return render_template(
+            "calendar.html",
+            account={
+                "id": account["id"],
+                "label": account["account_label"],
+                "email": account["google_email"],
+                "last_synced": db.get_last_full_sync(
+                    web_auth.tenant_account_key(tenant_id, account["account_label"])
+                ),
+                "sync_window_days": account["sync_window_days"],
+            },
+            default_sync_window_days=cfg.sync_window_days,
+            outgoing=outgoing,
+            incoming=incoming,
+            sync_window_error=session.pop("sync_window_error", None),
+        )
+
+    @app.post("/calendars/<int:account_id>/sync-window")
+    def set_calendar_sync_window(account_id: int):
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        if db.get_connected_account(tenant_id, account_id) is None:
+            abort(404)
+        raw = request.form.get("sync_window_days", "").strip()
+        if not raw:
+            db.set_account_sync_window(tenant_id, account_id, None)
+        else:
+            try:
+                days = float(raw)
+            except ValueError:
+                days = None
+            if days is None or days <= 0:
+                session["sync_window_error"] = "Sync window must be a positive number of days."
+                return redirect(url_for("calendar_detail", account_id=account_id))
+            db.set_account_sync_window(tenant_id, account_id, days)
+        log_event(logger, "web_calendar_sync_window_changed", tenant_id=tenant_id, account_id=account_id)
+        return redirect(url_for("calendar_detail", account_id=account_id))
+
+    def _redirect_after_pair_change():
+        raw_account_id = request.form.get("return_account_id", "")
+        if raw_account_id.isdigit():
+            return redirect(url_for("calendar_detail", account_id=int(raw_account_id)))
+        return redirect(url_for("dashboard"))
 
     @app.post("/sync")
     def sync_now():
@@ -172,7 +233,25 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             logger, "web_pair_copy_mode_changed",
             tenant_id=tenant_id, source=source_label, dest=dest_label, mode=mode,
         )
-        return redirect(url_for("dashboard"))
+        return _redirect_after_pair_change()
+
+    @app.post("/pairs/enabled")
+    def toggle_pair_enabled():
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        source_label = request.form.get("source_account_label", "")
+        dest_label = request.form.get("dest_account_label", "")
+        enabled = request.form.get("enabled", "")
+        valid_labels = {acc["account_label"] for acc in db.list_connected_accounts(tenant_id)}
+        if source_label not in valid_labels or dest_label not in valid_labels or enabled not in ("1", "0"):
+            abort(400)
+        db.set_pair_enabled(tenant_id, source_label, dest_label, enabled == "1")
+        log_event(
+            logger, "web_pair_enabled_changed",
+            tenant_id=tenant_id, source=source_label, dest=dest_label, enabled=enabled,
+        )
+        return _redirect_after_pair_change()
 
     @app.post("/accounts/<int:account_id>/disconnect")
     def disconnect(account_id: int):
