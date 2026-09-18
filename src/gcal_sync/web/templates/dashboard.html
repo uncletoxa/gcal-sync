@@ -24,7 +24,10 @@
     {% for account in accounts %}
       <div class="list-group-item d-flex justify-content-between align-items-center">
         <div>
-          <strong>{{ account.email }}</strong><br>
+          <strong>{{ account.display_name or account.email }}</strong><br>
+          {% if account.display_name %}
+            <span class="text-muted small">{{ account.email }}</span><br>
+          {% endif %}
           <span class="text-muted small">
             {% if account.last_synced %}Last synced {{ account.last_synced|human_time }}{% else %}Not yet synced{% endif %}
           </span>

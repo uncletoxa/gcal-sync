@@ -141,6 +141,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             {
                 "id": acc["id"],
                 "email": acc["google_email"],
+                "display_name": acc["display_name"] or "",
                 "last_synced": db.get_last_full_sync(
                     web_auth.tenant_account_key(tenant_id, acc["account_label"])
                 ),
@@ -174,6 +175,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
             {
                 "label": other["account_label"],
                 "email": other["google_email"],
+                "display_name": other["display_name"] or "",
                 "full_copy": (other["account_label"], account["account_label"]) in full_copy_pairs,
                 "enabled": (other["account_label"], account["account_label"]) not in disabled_pairs,
                 "title_template": pair_templates.get(
