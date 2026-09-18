@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS connected_accounts (
     calendar_id TEXT NOT NULL,
     credentials_json TEXT NOT NULL,
     sync_window_days REAL,
+    display_name TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(tenant_id, account_label)
@@ -52,6 +53,8 @@ CREATE TABLE IF NOT EXISTS pair_settings (
     dest_account_label TEXT NOT NULL,
     copy_mode TEXT NOT NULL DEFAULT 'busy_only',
     enabled INTEGER NOT NULL DEFAULT 1,
+    title_template TEXT,
+    description_template TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (tenant_id, source_account_label, dest_account_label)
 );
@@ -84,10 +87,16 @@ class Database:
         account_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(connected_accounts)")}
         if "sync_window_days" not in account_columns:
             self._conn.execute("ALTER TABLE connected_accounts ADD COLUMN sync_window_days REAL")
+        if "display_name" not in account_columns:
+            self._conn.execute("ALTER TABLE connected_accounts ADD COLUMN display_name TEXT")
 
         pair_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(pair_settings)")}
         if "enabled" not in pair_columns:
             self._conn.execute("ALTER TABLE pair_settings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        if "title_template" not in pair_columns:
+            self._conn.execute("ALTER TABLE pair_settings ADD COLUMN title_template TEXT")
+        if "description_template" not in pair_columns:
+            self._conn.execute("ALTER TABLE pair_settings ADD COLUMN description_template TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -276,6 +285,16 @@ class Database:
         )
         self._conn.commit()
 
+
+    def set_account_display_name(self, tenant_id: int, account_id: int, display_name: Optional[str]) -> None:
+        """User-facing name for this calendar, used as the {calendar} template token when
+        its events are mirrored elsewhere. None/empty falls back to showing the account's email."""
+        self._conn.execute(
+            "UPDATE connected_accounts SET display_name = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+            (display_name or None, _now(), account_id, tenant_id),
+        )
+        self._conn.commit()
+
     def delete_connected_account(self, tenant_id: int, account_id: int) -> None:
         self._conn.execute(
             "DELETE FROM connected_accounts WHERE id = ? AND tenant_id = ?",
@@ -341,5 +360,46 @@ class Database:
                 updated_at = excluded.updated_at
             """,
             (tenant_id, source_account_label, dest_account_label, int(enabled), _now()),
+        )
+        self._conn.commit()
+
+
+    def get_pair_templates(self, tenant_id: int) -> dict[tuple[str, str], tuple[Optional[str], Optional[str]]]:
+        """Directed (source_label, dest_label) -> (title_template, description_template)
+        for pairs with a custom template configured; pairs absent here use the default
+        passthrough (mirror the source's own title/description verbatim)."""
+        rows = self._conn.execute(
+            """
+            SELECT source_account_label, dest_account_label, title_template, description_template
+            FROM pair_settings
+            WHERE tenant_id = ? AND (title_template IS NOT NULL OR description_template IS NOT NULL)
+            """,
+            (tenant_id,),
+        ).fetchall()
+        return {
+            (row["source_account_label"], row["dest_account_label"]): (row["title_template"], row["description_template"])
+            for row in rows
+        }
+
+    def set_pair_templates(
+        self,
+        tenant_id: int,
+        source_account_label: str,
+        dest_account_label: str,
+        title_template: Optional[str],
+        description_template: Optional[str],
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO pair_settings (
+                tenant_id, source_account_label, dest_account_label,
+                title_template, description_template, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(tenant_id, source_account_label, dest_account_label) DO UPDATE SET
+                title_template = excluded.title_template,
+                description_template = excluded.description_template,
+                updated_at = excluded.updated_at
+            """,
+            (tenant_id, source_account_label, dest_account_label, title_template, description_template, _now()),
         )
         self._conn.commit()

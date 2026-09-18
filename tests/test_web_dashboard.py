@@ -117,7 +117,7 @@ def test_calendar_detail_shows_pair_toggle_for_two_accounts(tmp_path):
     resp = client.get(f"/calendars/{account_id}")
 
     assert b"Busy only" in resp.data
-    assert b"Enable full copy" in resp.data
+    assert b"Enable custom template" in resp.data
     db.close()
 
 
@@ -145,20 +145,21 @@ def test_toggle_pair_copy_mode_persists_and_reflects_on_calendar_detail(tmp_path
             tenant_id=tenant_id, account_label=label,
             google_email=label, calendar_id=label, credentials_json="cipher",
         )
-    account_id = _account_id(db, tenant_id, "a@example.com")
+    # a -> b is only configurable from b's page now — the incoming side.
+    dest_account_id = _account_id(db, tenant_id, "b@example.com")
 
     resp = client.post(
         "/pairs/copy-mode",
         data={
             "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
-            "mode": "full", "return_account_id": str(account_id),
+            "mode": "full", "return_account_id": str(dest_account_id),
         },
         follow_redirects=True,
     )
 
     assert resp.status_code == 200
-    assert b"Full copy" in resp.data
-    assert b"Disable full copy" in resp.data
+    assert b"Custom template" in resp.data
+    assert b"Disable custom template" in resp.data
     assert db.get_full_copy_pairs(tenant_id) == {("a@example.com", "b@example.com")}
     db.close()
 
@@ -171,13 +172,14 @@ def test_toggle_pair_enabled_disables_and_reenables_pair(tmp_path):
             tenant_id=tenant_id, account_label=label,
             google_email=label, calendar_id=label, credentials_json="cipher",
         )
-    account_id = _account_id(db, tenant_id, "a@example.com")
+    # a -> b is only configurable from b's page now — the incoming side.
+    dest_account_id = _account_id(db, tenant_id, "b@example.com")
 
     resp = client.post(
         "/pairs/enabled",
         data={
             "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
-            "enabled": "0", "return_account_id": str(account_id),
+            "enabled": "0", "return_account_id": str(dest_account_id),
         },
         follow_redirects=True,
     )
@@ -190,7 +192,7 @@ def test_toggle_pair_enabled_disables_and_reenables_pair(tmp_path):
         "/pairs/enabled",
         data={
             "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
-            "enabled": "1", "return_account_id": str(account_id),
+            "enabled": "1", "return_account_id": str(dest_account_id),
         },
     )
     assert db.get_disabled_pairs(tenant_id) == set()
@@ -293,6 +295,122 @@ def test_toggle_pair_copy_mode_requires_login(tmp_path):
     resp = client.post(
         "/pairs/copy-mode",
         data={"source_account_label": "a", "dest_account_label": "b", "mode": "full"},
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/")
+    db.close()
+
+
+def test_calendar_detail_only_shows_incoming(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    for label in ("a@example.com", "b@example.com"):
+        db.upsert_connected_account(
+            tenant_id=tenant_id, account_label=label,
+            google_email=label, calendar_id=label, credentials_json="cipher",
+        )
+    account_id = _account_id(db, tenant_id, "a@example.com")
+
+    resp = client.get(f"/calendars/{account_id}")
+
+    assert b"Outgoing" not in resp.data
+    assert b"Incoming connections" in resp.data
+    db.close()
+
+
+def test_set_calendar_display_name_persists_and_reflects(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    db.upsert_connected_account(
+        tenant_id=tenant_id, account_label="a@example.com",
+        google_email="a@example.com", calendar_id="a@example.com", credentials_json="cipher",
+    )
+    account_id = _account_id(db, tenant_id, "a@example.com")
+
+    resp = client.post(
+        f"/calendars/{account_id}/display-name",
+        data={"display_name": "Personal"},
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+    assert b"Personal" in resp.data
+    assert db.get_connected_account(tenant_id, account_id)["display_name"] == "Personal"
+    db.close()
+
+
+def test_set_calendar_display_name_requires_login(tmp_path):
+    client, db = _client(tmp_path)
+    resp = client.post("/calendars/1/display-name", data={"display_name": "Personal"})
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/")
+    db.close()
+
+
+def test_set_calendar_display_name_404_for_unknown_account(tmp_path):
+    client, db = _client(tmp_path)
+    _sign_in(client, db)
+    resp = client.post("/calendars/999/display-name", data={"display_name": "Personal"})
+    assert resp.status_code == 404
+    db.close()
+
+
+def test_set_pair_template_persists_and_reflects_on_incoming_side(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    for label in ("a@example.com", "b@example.com"):
+        db.upsert_connected_account(
+            tenant_id=tenant_id, account_label=label,
+            google_email=label, calendar_id=label, credentials_json="cipher",
+        )
+    # a -> b's template is only editable/visible from b's page — the incoming side.
+    dest_account_id = _account_id(db, tenant_id, "b@example.com")
+    db.set_pair_copy_mode(tenant_id, "a@example.com", "b@example.com", "full")
+
+    resp = client.post(
+        "/pairs/template",
+        data={
+            "source_account_label": "a@example.com", "dest_account_label": "b@example.com",
+            "title_template": "Away: {title}", "description_template": "From {calendar}",
+            "return_account_id": str(dest_account_id),
+        },
+        follow_redirects=True,
+    )
+
+    assert resp.status_code == 200
+    assert b"Away: {title}" in resp.data
+    assert db.get_pair_templates(tenant_id) == {
+        ("a@example.com", "b@example.com"): ("Away: {title}", "From {calendar}")
+    }
+    db.close()
+
+
+def test_set_pair_template_rejects_unknown_account(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    db.upsert_connected_account(
+        tenant_id=tenant_id, account_label="a@example.com",
+        google_email="a@example.com", calendar_id="a@example.com", credentials_json="cipher",
+    )
+
+    resp = client.post(
+        "/pairs/template",
+        data={
+            "source_account_label": "a@example.com", "dest_account_label": "ghost@example.com",
+            "title_template": "{title}",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert db.get_pair_templates(tenant_id) == {}
+    db.close()
+
+
+def test_set_pair_template_requires_login(tmp_path):
+    client, db = _client(tmp_path)
+    resp = client.post(
+        "/pairs/template",
+        data={"source_account_label": "a", "dest_account_label": "b", "title_template": "{title}"},
     )
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/")

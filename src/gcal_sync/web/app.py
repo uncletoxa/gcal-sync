@@ -133,22 +133,20 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         accounts = db.list_connected_accounts(tenant_id)
         full_copy_pairs = db.get_full_copy_pairs(tenant_id)
         disabled_pairs = db.get_disabled_pairs(tenant_id)
+        pair_templates = db.get_pair_templates(tenant_id)
         other_accounts = [acc for acc in accounts if acc["id"] != account_id]
-        outgoing = [
-            {
-                "label": other["account_label"],
-                "email": other["google_email"],
-                "full_copy": (account["account_label"], other["account_label"]) in full_copy_pairs,
-                "enabled": (account["account_label"], other["account_label"]) not in disabled_pairs,
-            }
-            for other in other_accounts
-        ]
         incoming = [
             {
                 "label": other["account_label"],
                 "email": other["google_email"],
                 "full_copy": (other["account_label"], account["account_label"]) in full_copy_pairs,
                 "enabled": (other["account_label"], account["account_label"]) not in disabled_pairs,
+                "title_template": pair_templates.get(
+                    (other["account_label"], account["account_label"]), (None, None)
+                )[0] or "",
+                "description_template": pair_templates.get(
+                    (other["account_label"], account["account_label"]), (None, None)
+                )[1] or "",
             }
             for other in other_accounts
         ]
@@ -158,15 +156,16 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 "id": account["id"],
                 "label": account["account_label"],
                 "email": account["google_email"],
+                "display_name": account["display_name"] or "",
                 "last_synced": db.get_last_full_sync(
                     web_auth.tenant_account_key(tenant_id, account["account_label"])
                 ),
                 "sync_window_days": account["sync_window_days"],
             },
             default_sync_window_days=cfg.sync_window_days,
-            outgoing=outgoing,
             incoming=incoming,
             sync_window_error=session.pop("sync_window_error", None),
+            display_name_error=session.pop("display_name_error", None),
         )
 
     @app.post("/calendars/<int:account_id>/sync-window")
@@ -189,6 +188,18 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 return redirect(url_for("calendar_detail", account_id=account_id))
             db.set_account_sync_window(tenant_id, account_id, days)
         log_event(logger, "web_calendar_sync_window_changed", tenant_id=tenant_id, account_id=account_id)
+        return redirect(url_for("calendar_detail", account_id=account_id))
+
+    @app.post("/calendars/<int:account_id>/display-name")
+    def set_calendar_display_name(account_id: int):
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        if db.get_connected_account(tenant_id, account_id) is None:
+            abort(404)
+        display_name = request.form.get("display_name", "").strip()[:100] or None
+        db.set_account_display_name(tenant_id, account_id, display_name)
+        log_event(logger, "web_calendar_display_name_changed", tenant_id=tenant_id, account_id=account_id)
         return redirect(url_for("calendar_detail", account_id=account_id))
 
     def _redirect_after_pair_change():
@@ -232,6 +243,25 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         log_event(
             logger, "web_pair_copy_mode_changed",
             tenant_id=tenant_id, source=source_label, dest=dest_label, mode=mode,
+        )
+        return _redirect_after_pair_change()
+
+    @app.post("/pairs/template")
+    def set_pair_template():
+        tenant_id = session.get("tenant_id")
+        if not tenant_id:
+            return redirect(url_for("index"))
+        source_label = request.form.get("source_account_label", "")
+        dest_label = request.form.get("dest_account_label", "")
+        valid_labels = {acc["account_label"] for acc in db.list_connected_accounts(tenant_id)}
+        if source_label not in valid_labels or dest_label not in valid_labels:
+            abort(400)
+        title_template = request.form.get("title_template", "").strip()[:500] or None
+        description_template = request.form.get("description_template", "").strip()[:500] or None
+        db.set_pair_templates(tenant_id, source_label, dest_label, title_template, description_template)
+        log_event(
+            logger, "web_pair_template_changed",
+            tenant_id=tenant_id, source=source_label, dest=dest_label,
         )
         return _redirect_after_pair_change()
 

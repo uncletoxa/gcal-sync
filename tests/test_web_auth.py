@@ -168,3 +168,43 @@ def test_sync_tenant_builds_disabled_pairs_and_sync_window_overrides(tmp_path, m
     assert cfg.sync_window_overrides == {f"t{tid}:personal": 30.0}
 
     db.close()
+
+
+def test_sync_tenant_builds_pair_templates_and_calendar_display_names(tmp_path, monkeypatch):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("a@example.com")
+    for label in ("personal", "work"):
+        db.upsert_connected_account(
+            tenant_id=tenant["id"], account_label=label,
+            google_email=f"{label}@example.com", calendar_id=f"{label}-cal",
+            credentials_json="cipher",
+        )
+    personal_id = next(
+        acc["id"] for acc in db.list_connected_accounts(tenant["id"]) if acc["account_label"] == "personal"
+    )
+    db.set_account_display_name(tenant["id"], personal_id, "My Personal Calendar")
+    db.set_pair_templates(tenant["id"], "personal", "work", "Away: {title}", None)
+
+    monkeypatch.setattr(web_auth, "load_account_credentials", lambda db, cfg, acc: object())
+    monkeypatch.setattr(web_auth, "GoogleCalendarClient", lambda creds, label: object())
+
+    captured = {}
+
+    def fake_run_sync_pass(cfg, db, clients, dry_run=False, force_full=False):
+        captured["cfg"] = cfg
+        return {}
+
+    monkeypatch.setattr(web_auth, "run_sync_pass", fake_run_sync_pass)
+
+    accounts = db.list_connected_accounts(tenant["id"])
+    web_auth.sync_tenant(_cfg(tmp_path / "s.sqlite3"), db, tenant["id"], accounts, dry_run=True)
+
+    tid = tenant["id"]
+    cfg = captured["cfg"]
+    assert cfg.pair_templates == {(f"t{tid}:personal", f"t{tid}:work"): ("Away: {title}", None)}
+    assert cfg.calendar_display_names == {
+        f"t{tid}:personal": "My Personal Calendar",
+        f"t{tid}:work": "work@example.com",
+    }
+
+    db.close()

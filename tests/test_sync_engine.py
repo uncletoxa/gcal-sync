@@ -15,6 +15,8 @@ def _cfg(
     full_copy_pairs=frozenset(),
     disabled_pairs=frozenset(),
     sync_window_overrides=None,
+    pair_templates=None,
+    calendar_display_names=None,
 ):
     return SimpleNamespace(
         calendars=calendars or {"workspace": WORKSPACE_CAL, "personal": PERSONAL_CAL},
@@ -23,6 +25,8 @@ def _cfg(
         full_copy_pairs=full_copy_pairs,
         disabled_pairs=disabled_pairs,
         sync_window_overrides=sync_window_overrides or {},
+        pair_templates=pair_templates or {},
+        calendar_display_names=calendar_display_names or {},
     )
 
 
@@ -421,6 +425,79 @@ def test_full_copy_description_change_triggers_mirror_update(db, fake_client):
 
     mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
     assert mirror["description"] == "v2"
+
+
+# -- custom templates --------------------------------------------------------
+
+def test_template_renders_title_and_description_placeholders(db, fake_client):
+    fake_client.seed_event(
+        WORKSPACE_CAL,
+        make_event("w1", _dt(1, 10), _dt(1, 11), summary="Team sync", description="Discuss roadmap"),
+    )
+    cfg = _cfg(
+        full_copy_pairs=frozenset({("workspace", "personal")}),
+        pair_templates={("workspace", "personal"): ("Away: {title}", "From {calendar}: {description}")},
+        calendar_display_names={"workspace": "Work Calendar"},
+    )
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["summary"] == "Away: Team sync"
+    assert mirror["description"] == "From Work Calendar: Discuss roadmap"
+
+
+def test_template_falls_back_to_raw_passthrough_when_unset(db, fake_client):
+    fake_client.seed_event(
+        WORKSPACE_CAL,
+        make_event("w1", _dt(1, 10), _dt(1, 11), summary="Team sync", description="Discuss roadmap"),
+    )
+    # No entry in pair_templates for this pair — should behave exactly like plain full copy.
+    cfg = _cfg(full_copy_pairs=frozenset({("workspace", "personal")}))
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["summary"] == "Team sync"
+    assert mirror["description"] == "Discuss roadmap"
+
+
+def test_empty_rendered_title_falls_back_to_busy(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11), summary=""))
+    cfg = _cfg(
+        full_copy_pairs=frozenset({("workspace", "personal")}),
+        pair_templates={("workspace", "personal"): ("{title}", None)},
+    )
+
+    run_sync_pass(cfg, db, _clients(fake_client))
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["summary"] == "Busy"
+
+
+def test_template_change_triggers_mirror_update_on_force_full(db, fake_client):
+    fake_client.seed_event(
+        WORKSPACE_CAL,
+        make_event("w1", _dt(1, 10), _dt(1, 11), summary="Team sync", description="Discuss roadmap"),
+    )
+    cfg = _cfg(
+        full_copy_pairs=frozenset({("workspace", "personal")}),
+        pair_templates={("workspace", "personal"): ("Away: {title}", None)},
+    )
+    run_sync_pass(cfg, db, _clients(fake_client))
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["summary"] == "Away: Team sync"
+
+    # The source event itself never changes — only the template does. Without force_full
+    # this wouldn't be picked up (no sync-token delta), so this exercises the escape hatch.
+    cfg = _cfg(
+        full_copy_pairs=frozenset({("workspace", "personal")}),
+        pair_templates={("workspace", "personal"): ("Busy travelling: {title}", None)},
+    )
+    run_sync_pass(cfg, db, _clients(fake_client), force_full=True)
+
+    mirror = active(fake_client.events_in(PERSONAL_CAL))[0]
+    assert mirror["summary"] == "Busy travelling: Team sync"
 
 
 # A newly-added destination calendar never sees a source's pre-existing, unchanged

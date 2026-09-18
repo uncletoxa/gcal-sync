@@ -49,12 +49,22 @@ def should_skip_event(event: dict) -> bool:
     return False
 
 
-def event_signature(event: dict, full_copy: bool = False) -> str:
+def event_signature(
+    event: dict,
+    full_copy: bool = False,
+    title_template: str | None = None,
+    description_template: str | None = None,
+    calendar_name: str | None = None,
+) -> str:
     """A stable fingerprint of the parts of the event we mirror.
 
     Start/end always matter; with `full_copy` the fields it also mirrors
     (title, description, location, meeting link) are fingerprinted too, so
     edits to those propagate even when the event's timing hasn't changed.
+    The template strings and calendar name are fingerprinted too, so editing
+    a pair's template (or renaming a calendar used via {calendar}) also
+    forces an update on the next full-resync pass, without needing the
+    source event itself to change.
     """
     fields = {"start": event.get("start"), "end": event.get("end")}
     if full_copy:
@@ -62,14 +72,48 @@ def event_signature(event: dict, full_copy: bool = False) -> str:
         fields["description"] = event.get("description")
         fields["location"] = event.get("location")
         fields["hangoutLink"] = event.get("hangoutLink")
+        fields["title_template"] = title_template
+        fields["description_template"] = description_template
+        fields["calendar_name"] = calendar_name
     return json.dumps(fields, sort_keys=True)
 
 
+def _render_template(template: str, *, title: str, description: str, calendar: str) -> str:
+    """Fill {title}/{description}/{calendar} placeholders via literal substitution
+    (not str.format, so stray braces in a real event's title/description can't raise
+    or get misinterpreted as a format field)."""
+    return (
+        template
+        .replace("{title}", title)
+        .replace("{description}", description)
+        .replace("{calendar}", calendar)
+    )
+
+
 def build_mirror_body(
-    event: dict, source_account: str, source_calendar_id: str, full_copy: bool = False
+    event: dict,
+    source_account: str,
+    source_calendar_id: str,
+    full_copy: bool = False,
+    title_template: str | None = None,
+    description_template: str | None = None,
+    calendar_name: str | None = None,
 ) -> dict:
+    raw_title = event.get("summary") or ""
+    raw_description = event.get("description", "")
+    resolved_calendar_name = calendar_name or source_account
+
+    title = "Busy"
+    if full_copy:
+        title = raw_title
+        if title_template:
+            title = _render_template(
+                title_template, title=raw_title, description=raw_description, calendar=resolved_calendar_name
+            )
+        title = title or "Busy"
+
     body = {
-        "summary": (event.get("summary") or "Busy") if full_copy else "Busy",
+        "summary": title,
         "visibility": "private",
         "transparency": "opaque",
         "reminders": {"useDefault": False},
@@ -84,7 +128,11 @@ def build_mirror_body(
         },
     }
     if full_copy:
-        description = event.get("description", "")
+        description = raw_description
+        if description_template:
+            description = _render_template(
+                description_template, title=raw_title, description=raw_description, calendar=resolved_calendar_name
+            )
         hangout_link = event.get("hangoutLink")
         if hangout_link:
             link_note = f"Meeting link: {hangout_link}"
@@ -244,6 +292,9 @@ def propagate_to_destination(
     window_end: datetime,
     dry_run: bool = False,
     full_copy: bool = False,
+    title_template: str | None = None,
+    description_template: str | None = None,
+    calendar_name: str | None = None,
 ) -> SyncStats:
     """Mirror one source calendar's busy blocks into one destination calendar."""
     stats = SyncStats()
@@ -283,8 +334,11 @@ def propagate_to_destination(
                 log_event(logger, "event_skipped", source=source_calendar_key, dest=dest_account)
             continue
 
-        signature = event_signature(event, full_copy)
-        body = build_mirror_body(event, source_account, source_calendar_id, full_copy)
+        signature = event_signature(event, full_copy, title_template, description_template, calendar_name)
+        body = build_mirror_body(
+            event, source_account, source_calendar_id, full_copy,
+            title_template, description_template, calendar_name,
+        )
 
         if mapping is None or mapping["status"] != "active" or not mapping["dest_event_id"]:
             if not dry_run:
@@ -354,6 +408,8 @@ def sync_all_pairs(
     full_copy_pairs: frozenset[tuple[str, str]] = frozenset(),
     disabled_pairs: frozenset[tuple[str, str]] = frozenset(),
     sync_window_overrides: dict[str, float] | None = None,
+    pair_templates: dict[tuple[str, str], tuple[str | None, str | None]] | None = None,
+    calendar_display_names: dict[str, str] | None = None,
     force_full: bool = False,
 ) -> dict[str, SyncStats]:
     """Mirror busy blocks between every ordered pair of configured calendars.
@@ -373,6 +429,14 @@ def sync_all_pairs(
     override, used when that account is the source; accounts not present fall back
     to `sync_window_days`.
 
+    `pair_templates` maps a (source, dest) pair in `full_copy_pairs` to a
+    (title_template, description_template) override; a pair absent here, or with a
+    None half, keeps the default raw passthrough for that half.
+
+    `calendar_display_names` maps an account name to the user-facing name used to
+    fill the {calendar} template placeholder when that account is the source;
+    accounts not present fall back to their account name.
+
     `force_full` re-fetches every source calendar in full regardless of its
     sync-token/last-full-sync bookkeeping — needed e.g. right after a new
     destination calendar is connected, since that destination has never seen any
@@ -381,6 +445,8 @@ def sync_all_pairs(
     accounts = list(calendar_ids)
     pair_stats: dict[str, SyncStats] = {}
     sync_window_overrides = sync_window_overrides or {}
+    pair_templates = pair_templates or {}
+    calendar_display_names = calendar_display_names or {}
 
     for source_account in accounts:
         source_calendar_id = calendar_ids[source_account]
@@ -400,6 +466,7 @@ def sync_all_pairs(
                 continue
             if (source_account, dest_account) in disabled_pairs:
                 continue
+            title_template, description_template = pair_templates.get((source_account, dest_account), (None, None))
             pair_stats[f"{source_account}->{dest_account}"] = propagate_to_destination(
                 events,
                 source_force_full,
@@ -414,6 +481,9 @@ def sync_all_pairs(
                 window_end=window_end,
                 dry_run=dry_run,
                 full_copy=(source_account, dest_account) in full_copy_pairs,
+                title_template=title_template,
+                description_template=description_template,
+                calendar_name=calendar_display_names.get(source_account, source_account),
             )
 
         if not dry_run:
@@ -444,6 +514,8 @@ def run_sync_pass(
         full_copy_pairs=cfg.full_copy_pairs,
         disabled_pairs=cfg.disabled_pairs,
         sync_window_overrides=cfg.sync_window_overrides,
+        pair_templates=cfg.pair_templates,
+        calendar_display_names=cfg.calendar_display_names,
         force_full=force_full,
     )
 

@@ -168,10 +168,12 @@ def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bo
     tenant_calendars = {}
     tenant_clients = {}
     sync_window_overrides = {}
+    calendar_display_names = {}
     for acc in accounts:
         key = tenant_account_key(tenant_id, acc["account_label"])
         tenant_calendars[key] = acc["calendar_id"]
         tenant_clients[key] = GoogleCalendarClient(load_account_credentials(db, cfg, acc), key)
+        calendar_display_names[key] = acc["display_name"] or acc["google_email"]
         if acc["sync_window_days"] is not None:
             sync_window_overrides[key] = acc["sync_window_days"]
     full_copy_pairs = frozenset(
@@ -182,11 +184,17 @@ def sync_tenant(cfg: Config, db: Database, tenant_id: int, accounts, dry_run: bo
         (tenant_account_key(tenant_id, source), tenant_account_key(tenant_id, dest))
         for source, dest in db.get_disabled_pairs(tenant_id)
     )
+    pair_templates = {
+        (tenant_account_key(tenant_id, source), tenant_account_key(tenant_id, dest)): templates
+        for (source, dest), templates in db.get_pair_templates(tenant_id).items()
+    }
     tenant_cfg = dataclasses.replace(
         cfg,
         calendars=tenant_calendars,
         full_copy_pairs=full_copy_pairs,
         disabled_pairs=disabled_pairs,
         sync_window_overrides=sync_window_overrides,
+        pair_templates=pair_templates,
+        calendar_display_names=calendar_display_names,
     )
     return run_sync_pass(tenant_cfg, db, tenant_clients, dry_run=dry_run, force_full=force_full)

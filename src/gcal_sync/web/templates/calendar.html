@@ -7,6 +7,19 @@
     {% if account.last_synced %}Last synced {{ account.last_synced }}{% else %}Not yet synced{% endif %}
   </p>
 
+  <h2 style="margin-top: 2rem;">Calendar name</h2>
+  <p class="muted">
+    Shown as {calendar} in templates on calendars this one is synced into. Leave blank to
+    use the account email.
+  </p>
+  {% if display_name_error %}
+    <p class="error">{{ display_name_error }}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('set_calendar_display_name', account_id=account.id) }}">
+    <input type="text" name="display_name" maxlength="100" placeholder="{{ account.email }}" value="{{ account.display_name }}">
+    <button class="btn-secondary" type="submit">Save</button>
+  </form>
+
   {% if sync_window_error %}
     <p class="error">{{ sync_window_error }}</p>
   {% endif %}
@@ -25,54 +38,22 @@
     <button class="btn-secondary" type="submit">Save</button>
   </form>
 
-  {% if outgoing or incoming %}
-    <p class="muted" style="margin-top: 2rem;">
-      By default only busy/free blocks are mirrored. Enable full copy to also mirror
-      title, description, and location for a specific direction. Attendees are never
-      copied either way. Disabling a direction stops future syncing but does not remove
-      Busy blocks already created.
-    </p>
-  {% endif %}
-
-  {% if outgoing %}
-    <h2>Outgoing — this calendar &rarr; others</h2>
-    {% for pair in outgoing %}
-      <div class="account">
-        <div>
-          &rarr; {{ pair.email }}:
-          <strong>{{ "Disabled" if not pair.enabled else ("Full copy" if pair.full_copy else "Busy only") }}</strong>
-        </div>
-        <div>
-          <form class="inline" method="post" action="{{ url_for('toggle_pair_enabled') }}">
-            <input type="hidden" name="source_account_label" value="{{ account.label }}">
-            <input type="hidden" name="dest_account_label" value="{{ pair.label }}">
-            <input type="hidden" name="enabled" value="{{ '0' if pair.enabled else '1' }}">
-            <input type="hidden" name="return_account_id" value="{{ account.id }}">
-            <button class="btn-secondary" type="submit">{{ "Disable" if pair.enabled else "Enable" }}</button>
-          </form>
-          {% if pair.enabled %}
-            <form class="inline" method="post" action="{{ url_for('toggle_pair_copy_mode') }}">
-              <input type="hidden" name="source_account_label" value="{{ account.label }}">
-              <input type="hidden" name="dest_account_label" value="{{ pair.label }}">
-              <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
-              <input type="hidden" name="return_account_id" value="{{ account.id }}">
-              <button class="btn-secondary" type="submit">
-                {{ "Disable full copy" if pair.full_copy else "Enable full copy" }}
-              </button>
-            </form>
-          {% endif %}
-        </div>
-      </div>
-    {% endfor %}
-  {% endif %}
-
   {% if incoming %}
-    <h2 style="margin-top: 2rem;">Incoming — others &rarr; this calendar</h2>
+    <p class="muted" style="margin-top: 2rem;">
+      By default only busy/free blocks are mirrored. Enable a custom template to also
+      mirror a title and description built from {title}, {description}, and {calendar}
+      placeholders — leave a template blank to pass that field through unchanged.
+      Location is always included in template mode. Attendees are never copied either
+      way. Disabling a connection stops future syncing but does not remove Busy blocks
+      already created.
+    </p>
+
+    <h2 style="margin-top: 2rem;">Incoming connections</h2>
     {% for pair in incoming %}
       <div class="account">
         <div>
           {{ pair.email }} &rarr;:
-          <strong>{{ "Disabled" if not pair.enabled else ("Full copy" if pair.full_copy else "Busy only") }}</strong>
+          <strong>{{ "Disabled" if not pair.enabled else ("Custom template" if pair.full_copy else "Busy only") }}</strong>
         </div>
         <div>
           <form class="inline" method="post" action="{{ url_for('toggle_pair_enabled') }}">
@@ -89,18 +70,39 @@
               <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
               <input type="hidden" name="return_account_id" value="{{ account.id }}">
               <button class="btn-secondary" type="submit">
-                {{ "Disable full copy" if pair.full_copy else "Enable full copy" }}
+                {{ "Disable custom template" if pair.full_copy else "Enable custom template" }}
               </button>
             </form>
           {% endif %}
         </div>
       </div>
+      {% if pair.enabled and pair.full_copy %}
+        <form method="post" action="{{ url_for('set_pair_template') }}" style="margin: 0.5em 0 1em;">
+          <input type="hidden" name="source_account_label" value="{{ pair.label }}">
+          <input type="hidden" name="dest_account_label" value="{{ account.label }}">
+          <input type="hidden" name="return_account_id" value="{{ account.id }}">
+          <p class="muted" style="margin-bottom: 0.4em;">
+            Placeholders: {title}, {description}, {calendar}
+          </p>
+          <input
+            type="text" name="title_template" maxlength="500"
+            placeholder="Title template (default: {title})"
+            value="{{ pair.title_template }}"
+            style="width: 100%; margin-bottom: 0.4em; box-sizing: border-box;"
+          >
+          <input
+            type="text" name="description_template" maxlength="500"
+            placeholder="Description template (default: {description})"
+            value="{{ pair.description_template }}"
+            style="width: 100%; margin-bottom: 0.4em; box-sizing: border-box;"
+          >
+          <button class="btn-secondary" type="submit">Save template</button>
+        </form>
+      {% endif %}
     {% endfor %}
-  {% endif %}
-
-  {% if not outgoing and not incoming %}
+  {% else %}
     <p class="muted" style="margin-top: 2rem;">
-      Connect at least one more calendar to configure sync directions for this one.
+      Connect at least one more calendar to configure sync connections for this one.
     </p>
   {% endif %}
 

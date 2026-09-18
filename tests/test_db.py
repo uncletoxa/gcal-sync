@@ -250,6 +250,74 @@ def test_account_sync_window_defaults_to_none_and_roundtrips(tmp_path):
     db.close()
 
 
+def test_account_display_name_defaults_to_none_and_roundtrips(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+    db.upsert_connected_account(
+        tenant_id=tenant["id"], account_label="a", google_email="a@example.com",
+        calendar_id="cal", credentials_json="cipher",
+    )
+    account_id = db.list_connected_accounts(tenant["id"])[0]["id"]
+
+    assert db.get_connected_account(tenant["id"], account_id)["display_name"] is None
+
+    db.set_account_display_name(tenant["id"], account_id, "Personal")
+    assert db.get_connected_account(tenant["id"], account_id)["display_name"] == "Personal"
+
+    db.set_account_display_name(tenant["id"], account_id, None)
+    assert db.get_connected_account(tenant["id"], account_id)["display_name"] is None
+
+    db.close()
+
+
+def test_pair_templates_default_to_empty_and_roundtrip(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    assert db.get_pair_templates(tenant["id"]) == {}
+
+    db.set_pair_templates(tenant["id"], "a", "b", "Away: {title}", "From {calendar}: {description}")
+    assert db.get_pair_templates(tenant["id"]) == {
+        ("a", "b"): ("Away: {title}", "From {calendar}: {description}")
+    }
+
+    # Only the reverse direction is queried here, confirming templates are directional.
+    assert ("b", "a") not in db.get_pair_templates(tenant["id"])
+
+    db.set_pair_templates(tenant["id"], "a", "b", None, None)
+    assert db.get_pair_templates(tenant["id"]) == {}
+
+    db.close()
+
+
+def test_pair_templates_are_isolated_per_tenant(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    t1 = db.get_or_create_tenant("t1@example.com")
+    t2 = db.get_or_create_tenant("t2@example.com")
+
+    db.set_pair_templates(t1["id"], "a", "b", "{title}", None)
+
+    assert db.get_pair_templates(t1["id"]) == {("a", "b"): ("{title}", None)}
+    assert db.get_pair_templates(t2["id"]) == {}
+
+    db.close()
+
+
+def test_pair_templates_are_independent_of_copy_mode_and_enabled(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+    tenant = db.get_or_create_tenant("alice@example.com")
+
+    db.set_pair_copy_mode(tenant["id"], "a", "b", "full")
+    db.set_pair_enabled(tenant["id"], "a", "b", False)
+    db.set_pair_templates(tenant["id"], "a", "b", "{title}", "{description}")
+
+    assert db.get_full_copy_pairs(tenant["id"]) == {("a", "b")}
+    assert db.get_disabled_pairs(tenant["id"]) == {("a", "b")}
+    assert db.get_pair_templates(tenant["id"]) == {("a", "b"): ("{title}", "{description}")}
+
+    db.close()
+
+
 def test_get_connected_account_returns_none_for_wrong_tenant(tmp_path):
     db = Database(str(tmp_path / "s.sqlite3"))
     t1 = db.get_or_create_tenant("t1@example.com")
@@ -319,11 +387,16 @@ def test_migration_adds_new_columns_to_pre_existing_database(tmp_path):
     account = db.get_connected_account(1, 1)
     assert account["google_email"] == "a@example.com"  # pre-existing data survives
     assert account["sync_window_days"] is None  # new column, added with NULL default
+    assert account["display_name"] is None  # new column, added with NULL default
 
     assert db.get_full_copy_pairs(1) == {("a", "b")}  # pre-existing row survives
     assert db.get_disabled_pairs(1) == set()  # new column, added enabled=1 default
+    assert db.get_pair_templates(1) == {}  # new columns, added with NULL default
 
     db.set_pair_enabled(1, "a", "b", False)
     assert db.get_disabled_pairs(1) == {("a", "b")}
+
+    db.set_pair_templates(1, "a", "b", "{title}", None)
+    assert db.get_pair_templates(1) == {("a", "b"): ("{title}", None)}
 
     db.close()

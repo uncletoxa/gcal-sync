@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -44,6 +45,15 @@ class Config:
     # account acts as the sync source. Populated per-tenant from connected_accounts by
     # web_auth.sync_tenant; not configurable via .env.
     sync_window_overrides: dict[str, float] = field(default_factory=dict)
+    # Per-pair (source, dest) title/description template overrides for pairs in
+    # full_copy_pairs, using {title}/{description}/{calendar} placeholders; either half
+    # may be None to keep the default raw passthrough. Populated per-tenant from
+    # pair_settings by web_auth.sync_tenant; not configurable via .env.
+    pair_templates: dict[tuple[str, str], tuple[Optional[str], Optional[str]]] = field(default_factory=dict)
+    # Account name -> user-facing display name, used to fill the {calendar} template
+    # placeholder when that account is a sync source. Populated per-tenant from
+    # connected_accounts by web_auth.sync_tenant; not configurable via .env.
+    calendar_display_names: dict[str, str] = field(default_factory=dict)
 
 
 def _parse_calendars(raw: str) -> dict[str, str]:
