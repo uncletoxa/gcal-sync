@@ -45,7 +45,10 @@ class CalendarClient(ABC):
     def insert_event(self, calendar_id: str, body: dict) -> dict: ...
 
     @abstractmethod
-    def patch_event(self, calendar_id: str, event_id: str, body: dict) -> dict: ...
+    def get_event(self, calendar_id: str, event_id: str) -> Optional[dict]: ...
+
+    @abstractmethod
+    def patch_event(self, calendar_id: str, event_id: str, body: dict) -> Optional[dict]: ...
 
     @abstractmethod
     def delete_event(self, calendar_id: str, event_id: str) -> None: ...
@@ -149,13 +152,31 @@ class GoogleCalendarClient(CalendarClient):
             "insert_event",
         )
 
-    def patch_event(self, calendar_id, event_id, body) -> dict:
-        return self._invoke(
-            lambda: self._service.events()
-            .patch(calendarId=calendar_id, eventId=event_id, body=body, sendUpdates="none")
-            .execute(),
-            "patch_event",
-        )
+    def get_event(self, calendar_id, event_id) -> Optional[dict]:
+        def op():
+            try:
+                return self._service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            except HttpError as exc:
+                if _http_status(exc) in (404, 410):
+                    return None
+                raise
+
+        return self._invoke(op, "get_event")
+
+    def patch_event(self, calendar_id, event_id, body) -> Optional[dict]:
+        def op():
+            try:
+                return (
+                    self._service.events()
+                    .patch(calendarId=calendar_id, eventId=event_id, body=body, sendUpdates="none")
+                    .execute()
+                )
+            except HttpError as exc:
+                if _http_status(exc) in (404, 410):
+                    return None  # destination copy is gone: caller should recreate it
+                raise
+
+        return self._invoke(op, "patch_event")
 
     def delete_event(self, calendar_id, event_id) -> None:
         def op():

@@ -152,6 +152,81 @@ def test_source_event_deleted_removes_mirror(db, fake_client):
     assert active(fake_client.events_in(PERSONAL_CAL)) == []
 
 
+# 5b. Source event deleted, then the same event id reappears (e.g. restored from
+# trash) -> it must be mirrored again, not left out forever.
+def test_source_event_deleted_then_restored_resyncs(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+    assert len(active(fake_client.events_in(PERSONAL_CAL))) == 1
+
+    fake_client.cancel_event(WORKSPACE_CAL, "w1")
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+    assert active(fake_client.events_in(PERSONAL_CAL)) == []
+
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+
+    assert len(active(fake_client.events_in(PERSONAL_CAL))) == 1
+
+
+# 5c. Mirror manually deleted directly on the destination calendar, then the source
+# event changes -> the resulting patch against the now-missing mirror must not crash
+# the sync pass; it should recreate the mirror instead.
+def test_manually_deleted_mirror_is_recreated_when_source_changes(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+    mirror_id = active(fake_client.events_in(PERSONAL_CAL))[0]["id"]
+
+    fake_client.delete_event(PERSONAL_CAL, mirror_id)
+    assert active(fake_client.events_in(PERSONAL_CAL)) == []
+
+    fake_client.patch_event(
+        WORKSPACE_CAL, "w1", {"end": {"dateTime": _dt(1, 12), "timeZone": "America/New_York"}}
+    )
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+
+    mirrors = active(fake_client.events_in(PERSONAL_CAL))
+    assert len(mirrors) == 1
+    assert mirrors[0]["id"] != mirror_id
+    assert mirrors[0]["end"]["dateTime"] == _dt(1, 12)
+
+
+# 5d. Mirror manually deleted directly on the destination calendar while the source
+# event stays unchanged -> the destination's own next incremental fetch already
+# contains the cancelled tombstone, so a plain sync pass (no force_full needed)
+# notices and restores it.
+def test_manually_deleted_mirror_is_restored_by_next_sync_pass(db, fake_client):
+    fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+    mirror_id = active(fake_client.events_in(PERSONAL_CAL))[0]["id"]
+
+    fake_client.delete_event(PERSONAL_CAL, mirror_id)
+    assert active(fake_client.events_in(PERSONAL_CAL)) == []
+
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+
+    mirrors = active(fake_client.events_in(PERSONAL_CAL))
+    assert len(mirrors) == 1
+    assert mirrors[0]["id"] != mirror_id
+
+
+# 5e. Healing must not cost a get_event probe per mapping: a pass (even a full
+# resync) over many unchanged, still-valid mirrors should issue zero of them --
+# detection rides on each account's own fetch, not a per-mapping existence check.
+def test_full_resync_does_not_probe_every_unchanged_mapping(db, fake_client):
+    for i in range(25):
+        hour = i % 20
+        fake_client.seed_event(WORKSPACE_CAL, make_event(f"w{i}", _dt(1, hour), _dt(1, hour + 1)))
+
+    run_sync_pass(_cfg(), db, _clients(fake_client))
+    assert len(active(fake_client.events_in(PERSONAL_CAL))) == 25
+
+    fake_client.call_counts.clear()
+    run_sync_pass(_cfg(full_resync_interval_hours=0), db, _clients(fake_client))
+
+    assert fake_client.call_counts.get("get_event", 0) == 0
+
+
 # 6. Mirror is not mirrored again (loop prevention)
 def test_mirror_is_not_remirrored(db, fake_client):
     fake_client.seed_event(WORKSPACE_CAL, make_event("w1", _dt(1, 10), _dt(1, 11)))

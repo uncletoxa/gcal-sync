@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS event_mappings (
     UNIQUE(source_account, source_calendar_id, source_event_id, dest_account, dest_calendar_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_event_mappings_dest
+    ON event_mappings(dest_account, dest_calendar_id, dest_event_id);
+
 CREATE TABLE IF NOT EXISTS tenants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -147,6 +150,17 @@ class Database:
               AND dest_account = ? AND dest_calendar_id = ?
             """,
             (source_account, source_calendar_id, source_event_id, dest_account, dest_calendar_id),
+        ).fetchone()
+
+    def get_mapping_by_dest_event(
+        self, dest_account, dest_calendar_id, dest_event_id
+    ) -> Optional[sqlite3.Row]:
+        return self._conn.execute(
+            """
+            SELECT * FROM event_mappings
+            WHERE dest_account = ? AND dest_calendar_id = ? AND dest_event_id = ? AND status = 'active'
+            """,
+            (dest_account, dest_calendar_id, dest_event_id),
         ).fetchone()
 
     def upsert_mapping(

@@ -38,11 +38,15 @@ class FakeCalendarClient:
 
     def __init__(self):
         self._calendars: dict[str, dict] = {}
+        self.call_counts: dict[str, int] = {}
 
     def _cal(self, calendar_id: str) -> dict:
         return self._calendars.setdefault(
             calendar_id, {"events": {}, "revision": 0, "changes": [], "expired_tokens": set()}
         )
+
+    def _count(self, operation: str) -> None:
+        self.call_counts[operation] = self.call_counts.get(operation, 0) + 1
 
     # -- test helpers ----------------------------------------------------
     def seed_event(self, calendar_id: str, event: dict) -> None:
@@ -94,10 +98,17 @@ class FakeCalendarClient:
         cal["changes"].append((cal["revision"], new_id))
         return event
 
-    def patch_event(self, calendar_id, event_id, body) -> dict:
+    def get_event(self, calendar_id, event_id) -> "dict | None":
+        self._count("get_event")
         cal = self._cal(calendar_id)
+        return cal["events"].get(event_id)
+
+    def patch_event(self, calendar_id, event_id, body) -> "dict | None":
+        cal = self._cal(calendar_id)
+        event = cal["events"].get(event_id)
+        if event is None or event.get("status") == "cancelled":
+            return None  # destination copy is gone: caller should recreate it
         cal["revision"] += 1
-        event = cal["events"][event_id]
         event.update(body)
         cal["changes"].append((cal["revision"], event_id))
         return event

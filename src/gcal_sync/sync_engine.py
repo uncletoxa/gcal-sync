@@ -272,8 +272,11 @@ def _fetch_source_events(
                 if event.get("status") == "cancelled" or _event_in_window(event, window_start, window_end)
             ]
 
-    # Never mirror a mirror: this is the core loop-prevention check.
-    events = [event for event in events if not is_mirror_event(event)]
+    # Never mirror a mirror: this is the core loop-prevention check. A cancelled
+    # event always passes through regardless, even one that still happens to carry
+    # our extendedProperties — heal_deleted_mirrors needs it to notice one of our
+    # own mirrors was deleted, and a gone event can't be re-propagated as a source.
+    events = [event for event in events if event.get("status") == "cancelled" or not is_mirror_event(event)]
     return events, next_sync_token, force_full, window_start, window_end
 
 
@@ -357,14 +360,21 @@ def propagate_to_destination(
             log_event(logger, "mirror_created", source=source_calendar_key, dest=dest_account)
         elif mapping["source_signature"] != signature:
             if not dry_run:
-                dest_client.patch_event(dest_calendar_id, mapping["dest_event_id"], body)
+                dest_event_id = mapping["dest_event_id"]
+                patched = dest_client.patch_event(dest_calendar_id, dest_event_id, body)
+                if patched is None:
+                    # The destination copy was deleted out from under us (e.g. manually,
+                    # or by the user's own calendar client) — recreate it rather than
+                    # leaving the mapping pointing at a dead event forever.
+                    created = dest_client.insert_event(dest_calendar_id, body)
+                    dest_event_id = created["id"]
                 db.upsert_mapping(
                     source_account=source_account,
                     source_calendar_id=source_calendar_id,
                     source_event_id=event_id,
                     dest_account=dest_account,
                     dest_calendar_id=dest_calendar_id,
-                    dest_event_id=mapping["dest_event_id"],
+                    dest_event_id=dest_event_id,
                     source_signature=signature,
                     status="active",
                 )
@@ -395,6 +405,80 @@ def propagate_to_destination(
             log_event(logger, "mirror_deleted", source=source_calendar_key, dest=dest_account, reason="orphan_cleanup")
 
     return stats
+
+
+def heal_deleted_mirrors(
+    events: list[dict],
+    account: str,
+    calendar_id: str,
+    clients: dict[str, CalendarClient],
+    db: Database,
+    *,
+    dry_run: bool,
+    disabled_pairs: frozenset[tuple[str, str]],
+    full_copy_pairs: frozenset[tuple[str, str]],
+    pair_templates: dict[tuple[str, str], tuple[str | None, str | None]],
+    calendar_display_names: dict[str, str],
+) -> int:
+    """Notice this account's own mirror events that were deleted directly on its
+    calendar (by the user, or anything else outside this tool) and recreate them.
+
+    `events` is one account's own already-fetched event list — the same one
+    `_fetch_source_events` produces for it every pass regardless of whether this
+    function is even called. A cancelled tombstone rarely still carries the
+    extendedProperties that mark it as one of ours, so the mirror-loop-prevention
+    filter can't recognize it as "our" event and it normally just falls through
+    inertly. Cross-referencing its id against our mapping table as a *destination*
+    event id (instead of the usual source-event lookup) recovers that signal for
+    free: no extra API calls beyond the fetch this pass was already making, and no
+    waiting for the next full resync — a plain incremental pass repairs it as soon
+    as the deletion shows up in that account's own sync-token diff.
+    """
+    healed = 0
+    for event in events:
+        if event.get("status") != "cancelled":
+            continue
+        mapping = db.get_mapping_by_dest_event(account, calendar_id, event["id"])
+        if mapping is None:
+            continue
+        pair = (mapping["source_account"], mapping["dest_account"])
+        if pair in disabled_pairs:
+            continue
+        source_client = clients.get(mapping["source_account"])
+        if source_client is None:
+            continue
+
+        source_event = source_client.get_event(mapping["source_calendar_id"], mapping["source_event_id"])
+        if source_event is None or source_event.get("status") == "cancelled" or should_skip_event(source_event):
+            # The original event is gone too (or no longer blocking) — nothing to
+            # restore; just stop treating this mapping as active.
+            if not dry_run:
+                db.mark_deleted(mapping["id"])
+            continue
+
+        title_template, description_template = pair_templates.get(pair, (None, None))
+        full_copy = pair in full_copy_pairs
+        calendar_name = calendar_display_names.get(mapping["source_account"], mapping["source_account"])
+        signature = event_signature(source_event, full_copy, title_template, description_template, calendar_name)
+        body = build_mirror_body(
+            source_event, mapping["source_account"], mapping["source_calendar_id"], full_copy,
+            title_template, description_template, calendar_name,
+        )
+        if not dry_run:
+            created = clients[account].insert_event(calendar_id, body)
+            db.upsert_mapping(
+                source_account=mapping["source_account"],
+                source_calendar_id=mapping["source_calendar_id"],
+                source_event_id=mapping["source_event_id"],
+                dest_account=account,
+                dest_calendar_id=calendar_id,
+                dest_event_id=created["id"],
+                source_signature=signature,
+                status="active",
+            )
+        healed += 1
+        log_event(logger, "mirror_restored", source=mapping["source_account"], dest=account, reason="dest_deleted")
+    return healed
 
 
 def sync_all_pairs(
@@ -459,6 +543,22 @@ def sync_all_pairs(
             full_resync_interval_hours=full_resync_interval_hours,
             sync_window_days=source_sync_window_days,
             force_full=force_full,
+        )
+
+        # Uses this same fetch to notice and repair any of this account's own
+        # mirror events that got deleted directly on its calendar — see
+        # heal_deleted_mirrors for why this doesn't cost any extra API calls.
+        heal_deleted_mirrors(
+            events,
+            source_account,
+            source_calendar_id,
+            clients,
+            db,
+            dry_run=dry_run,
+            disabled_pairs=disabled_pairs,
+            full_copy_pairs=full_copy_pairs,
+            pair_templates=pair_templates,
+            calendar_display_names=calendar_display_names,
         )
 
         for dest_account in accounts:
