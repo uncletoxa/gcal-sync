@@ -89,8 +89,11 @@
             style="border-left: 0.8em solid {{ event_colors[pair.color_id][1] if pair.color_id else '#ccc' }};"
           >
             <option value="" {{ "selected" if not pair.color_id }}>Default</option>
-            {% for id, (name, hex) in event_colors.items() %}
-              <option value="{{ id }}" {{ "selected" if pair.color_id == id }}>{{ name }}</option>
+            {% for id, (name, hex, text) in event_colors.items() %}
+              <option
+                value="{{ id }}" {{ "selected" if pair.color_id == id }}
+                style="background-color: {{ hex }}; color: {{ text }};"
+              >{{ name }}</option>
             {% endfor %}
           </select>
         </form>

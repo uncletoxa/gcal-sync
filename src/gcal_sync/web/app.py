@@ -13,21 +13,22 @@ from ..logging_config import log_event, setup_logging
 
 logger = logging.getLogger(__name__)
 
-# Google Calendar's fixed eventColor palette (id -> (name, hex)), used to color mirrored
-# events for a pair. Not exposed by any API the app calls — Google's client libraries hardcode
-# the same 11 colors, so we do too.
+# Google Calendar's fixed eventColor palette (id -> (name, hex, text color for readable
+# contrast on that background)), used to color mirrored events for a pair and to render a
+# swatch per option in the picker. Not exposed by any API the app calls — Google's client
+# libraries hardcode the same 11 colors, so we do too.
 EVENT_COLORS = {
-    "1": ("Lavender", "#7986cb"),
-    "2": ("Sage", "#33b679"),
-    "3": ("Grape", "#8e24aa"),
-    "4": ("Flamingo", "#e67c73"),
-    "5": ("Banana", "#f6c026"),
-    "6": ("Tangerine", "#f5511d"),
-    "7": ("Peacock", "#039be5"),
-    "8": ("Graphite", "#616161"),
-    "9": ("Blueberry", "#3f51b5"),
-    "10": ("Basil", "#0b8043"),
-    "11": ("Tomato", "#d60000"),
+    "1": ("Lavender", "#7986cb", "#fff"),
+    "2": ("Sage", "#33b679", "#fff"),
+    "3": ("Grape", "#8e24aa", "#fff"),
+    "4": ("Flamingo", "#e67c73", "#fff"),
+    "5": ("Banana", "#f6c026", "#1a1a1a"),
+    "6": ("Tangerine", "#f5511d", "#fff"),
+    "7": ("Peacock", "#039be5", "#fff"),
+    "8": ("Graphite", "#616161", "#fff"),
+    "9": ("Blueberry", "#3f51b5", "#fff"),
+    "10": ("Basil", "#0b8043", "#fff"),
+    "11": ("Tomato", "#d60000", "#fff"),
 }
 
 
