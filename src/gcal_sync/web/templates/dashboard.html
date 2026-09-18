@@ -26,7 +26,7 @@
         <div>
           <strong>{{ account.email }}</strong><br>
           <span class="text-muted small">
-            {% if account.last_synced %}Last synced {{ account.last_synced }}{% else %}Not yet synced{% endif %}
+            {% if account.last_synced %}Last synced {{ account.last_synced|human_time }}{% else %}Not yet synced{% endif %}
           </span>
         </div>
         <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('calendar_detail', account_id=account.id) }}">Manage</a>

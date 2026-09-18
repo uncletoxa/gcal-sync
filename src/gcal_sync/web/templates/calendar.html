@@ -4,7 +4,7 @@
   <p><a class="link-secondary" href="{{ url_for('dashboard') }}">&larr; All calendars</a></p>
   <h1>{{ account.email }}</h1>
   <p class="text-muted">
-    {% if account.last_synced %}Last synced {{ account.last_synced }}{% else %}Not yet synced{% endif %}
+    {% if account.last_synced %}Last synced {{ account.last_synced|human_time }}{% else %}Not yet synced{% endif %}
   </p>
 
   <div class="card mb-3">

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from flask import Flask, abort, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -32,6 +33,20 @@ EVENT_COLORS = {
 }
 
 
+def format_timestamp(value: str | None) -> str:
+    """Render a stored ISO-8601 UTC timestamp as e.g. "Sep 18, 2026, 4:28 PM UTC"."""
+    if not value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    hour = dt.strftime("%I").lstrip("0") or "12"
+    return f"{dt:%b %d, %Y}, {hour}:{dt:%M %p} UTC"
+
+
 def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
     cfg = cfg or load_config(require_calendars=False)
     setup_logging(cfg.log_level)
@@ -45,6 +60,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
     app.secret_key = cfg.web_secret_key
+    app.jinja_env.filters["human_time"] = format_timestamp
 
     db = db or Database(cfg.db_path)
 
