@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>GCal Sync</title>
+  <path
+    d="M52 18.5A24 24 0 1 0 52 45.5"
+    fill="none"
+    stroke="#000"
+    stroke-width="10"
+    stroke-linecap="butt"
+  />
+  <path d="M31 27h27v10H31z" fill="#000"/>
+  <path d="M48 32h10v13H48z" fill="#000"/>
+  <path d="M38 46h22v8H38z" fill="#d6001c"/>
+</svg>

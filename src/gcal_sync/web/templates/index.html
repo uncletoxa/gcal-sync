@@ -1,23 +1,31 @@
 {% extends "base.html" %}
 {% block title %}GCal Sync{% endblock %}
 {% block body %}
-  <h1>GCal Sync</h1>
-  <p class="lead">Keep your own calendars showing accurate combined availability.</p>
-  <p class="text-muted">
-    Connect two or more of your own Google Calendars (e.g. work + personal). We'll create
-    private, content-free "Busy" placeholders so each one reflects your combined
-    availability — never your event titles, descriptions, or attendees. Your calendars are
-    only ever synced against each other, never against anyone else's.
-  </p>
-  <p class="text-muted">
-    You'll sign in once per calendar. Stay signed in to gcal-sync between the two — use
-    "Connect another calendar" on your dashboard rather than signing out and starting over,
-    or you'll end up with two separate, unsynced accounts. If Google keeps offering the same
-    account for both, pick "Use another account" on its sign-in screen for the second one.
-  </p>
-  {% if allowed_domain %}
-    <p class="text-muted">Sign-up is restricted to <strong>@{{ allowed_domain }}</strong> accounts.</p>
-  {% endif %}
+  <div class="hero">
+    <h1 class="wordmark">GCal Sync</h1>
+    <div class="keyline"></div>
+    <p class="lead">Keep your own calendars showing accurate combined availability.</p>
+  </div>
+
+  <div class="prose">
+    <p>
+      Connect two or more of your own Google Calendars (e.g. work + personal). We'll create
+      private, content-free "Busy" placeholders so each one reflects your combined
+      availability — never your event titles, descriptions, or attendees. Your calendars are
+      only ever synced against each other, never against anyone else's.
+    </p>
+    <p>
+      You'll sign in once per calendar. Stay signed in to gcal-sync between the two — use
+      "Connect another calendar" on your dashboard rather than signing out and starting over,
+      or you'll end up with two separate, unsynced accounts. If Google keeps offering the same
+      account for both, pick "Use another account" on its sign-in screen for the second one.
+    </p>
+    {% if allowed_domain %}
+      <p class="muted small">Sign-up is restricted to <strong>@{{ allowed_domain }}</strong> accounts.</p>
+    {% endif %}
+  </div>
+
   {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
   <a class="btn btn-primary" href="{{ url_for('login') }}">Sign in with Google</a>
 {% endblock %}

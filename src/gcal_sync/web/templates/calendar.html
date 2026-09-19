@@ -1,36 +1,36 @@
 {% extends "base.html" %}
 {% block title %}{{ account.display_name or account.email }} — GCal Sync{% endblock %}
 {% block body %}
-  <p><a class="link-secondary" href="{{ url_for('dashboard') }}">&larr; All calendars</a></p>
+  <p><a class="muted small" href="{{ url_for('dashboard') }}">&larr; All calendars</a></p>
   <h1>{{ account.display_name or account.email }}</h1>
   {% if account.display_name %}
-    <p class="text-muted mb-1">{{ account.email }}</p>
+    <p class="muted mb-0">{{ account.email }}</p>
   {% endif %}
-  <p class="text-muted">
+  <p class="muted num">
     {% if account.last_synced %}Last synced {{ account.last_synced|human_time }}{% else %}Not yet synced{% endif %}
   </p>
 
-  <div class="card mb-3">
-    <div class="card-body">
-      <h2 class="h5">Calendar name</h2>
-      <p class="text-muted small">
+  <div class="field-row">
+    <label class="field-label" for="calendar-display-name">Calendar name</label>
+    <div>
+      <p class="muted small">
         Shown as {calendar} in templates on calendars this one is synced into. Leave blank to
         use the account email.
       </p>
       {% if display_name_error %}
         <div class="alert alert-danger">{{ display_name_error }}</div>
       {% endif %}
-      <form class="d-flex gap-2" method="post" action="{{ url_for('set_calendar_display_name', account_id=account.id) }}">
-        <input class="form-control" type="text" name="display_name" maxlength="100" placeholder="{{ account.email }}" value="{{ account.display_name }}">
-        <button class="btn btn-outline-secondary" type="submit">Save</button>
+      <form class="inline-form" method="post" action="{{ url_for('set_calendar_display_name', account_id=account.id) }}">
+        <input id="calendar-display-name" type="text" name="display_name" maxlength="100" placeholder="{{ account.email }}" value="{{ account.display_name }}">
+        <button class="btn btn-sm" type="submit">Save</button>
       </form>
     </div>
   </div>
 
-  <div class="card mb-3">
-    <div class="card-body">
-      <h2 class="h5">Sync window</h2>
-      <p class="text-muted small">
+  <div class="field-row">
+    <label class="field-label" for="sync-window-days">Sync window</label>
+    <div>
+      <p class="muted small">
         How many days ahead to look for events when this calendar is the source of a sync.
         Leave blank to use the instance default ({{ default_sync_window_days }} days).
         Maximum {{ max_sync_window_days | int }} days (~8 weeks) — a wider window mirrors
@@ -39,119 +39,146 @@
       {% if sync_window_error %}
         <div class="alert alert-danger">{{ sync_window_error }}</div>
       {% endif %}
-      <form class="d-flex gap-2" method="post" action="{{ url_for('set_calendar_sync_window', account_id=account.id) }}">
+      <form class="inline-form" method="post" action="{{ url_for('set_calendar_sync_window', account_id=account.id) }}">
         <input
-          class="form-control" style="max-width: 8rem;"
-          type="number" step="any" min="0" max="{{ max_sync_window_days | int }}" name="sync_window_days"
+          id="sync-window-days" type="number" step="any" min="0" max="{{ max_sync_window_days | int }}" name="sync_window_days"
+          style="max-width: 8rem;"
           placeholder="{{ default_sync_window_days }}"
           value="{{ account.sync_window_days if account.sync_window_days is not none else '' }}"
         >
-        <button class="btn btn-outline-secondary" type="submit">Save</button>
+        <button class="btn btn-sm" type="submit">Save</button>
       </form>
     </div>
   </div>
 
   {% if incoming %}
-    <p class="text-muted small">
-      By default only busy/free blocks are mirrored. Enable a custom template to also
-      mirror a title and description built from {title}, {description}, and {calendar}
-      placeholders — leave a template blank to pass that field through unchanged.
-      Location is always included in template mode. Attendees are never copied either
-      way. The event color applies in both modes — leave it on "Default" to use the
-      destination calendar's normal color. Disabling a connection stops future syncing
-      but does not remove Busy blocks already created.
-    </p>
+    <div class="sync-help mt-2">
+      <p class="muted small mb-0">
+        Connections mirror busy/free blocks by default. Each direction can be disabled or customized.
+      </p>
+      <details>
+        <summary>How mirroring works</summary>
+        <p class="muted small mb-0">
+          A custom template can mirror a title and description built from {title},
+          {description}, and {calendar}; leave a template blank to pass that field through
+          unchanged. Location is always included in template mode. Attendees are never copied.
+          Event color applies in both modes; "Default" uses the destination calendar's normal
+          color. Disabling a connection stops future syncing but does not remove Busy blocks
+          already created.
+        </p>
+      </details>
+    </div>
 
-    <h2 class="h5 mt-4">Incoming connections</h2>
+    <h2 class="mt-3">Incoming connections</h2>
     {% for pair in incoming %}
-      <div class="card mb-2">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <strong>{{ pair.display_name or pair.email }}</strong>
-              {% if pair.display_name %}<span class="text-muted small">({{ pair.email }})</span>{% endif %}
-              &rarr;
-              <strong>{{ "Disabled" if not pair.enabled else ("Custom template" if pair.full_copy else "Busy only") }}</strong>
-            </div>
-            <div class="d-flex gap-2">
-              <form method="post" action="{{ url_for('toggle_pair_enabled') }}">
+      <div class="pair">
+        <div class="pair-header">
+          <div>
+            <strong>{{ pair.display_name or pair.email }}</strong>
+            {% if pair.display_name %}<span class="muted small">({{ pair.email }})</span>{% endif %}
+            &rarr;
+            <span class="pair-status">{{ "Disabled" if not pair.enabled else ("Custom template" if pair.full_copy else "Busy only") }}</span>
+          </div>
+          <div class="pair-actions">
+            <form method="post" action="{{ url_for('toggle_pair_enabled') }}">
+              <input type="hidden" name="source_account_label" value="{{ pair.label }}">
+              <input type="hidden" name="dest_account_label" value="{{ account.label }}">
+              <input type="hidden" name="enabled" value="{{ '0' if pair.enabled else '1' }}">
+              <input type="hidden" name="return_account_id" value="{{ account.id }}">
+              <button class="btn btn-sm" type="submit">{{ "Disable" if pair.enabled else "Enable" }}</button>
+            </form>
+            {% if pair.enabled %}
+              <form method="post" action="{{ url_for('toggle_pair_copy_mode') }}">
                 <input type="hidden" name="source_account_label" value="{{ pair.label }}">
                 <input type="hidden" name="dest_account_label" value="{{ account.label }}">
-                <input type="hidden" name="enabled" value="{{ '0' if pair.enabled else '1' }}">
+                <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
                 <input type="hidden" name="return_account_id" value="{{ account.id }}">
-                <button class="btn btn-outline-secondary btn-sm" type="submit">{{ "Disable" if pair.enabled else "Enable" }}</button>
+                <button class="btn btn-sm" type="submit">
+                  {{ "Disable custom template" if pair.full_copy else "Enable custom template" }}
+                </button>
               </form>
-              {% if pair.enabled %}
-                <form method="post" action="{{ url_for('toggle_pair_copy_mode') }}">
+            {% endif %}
+          </div>
+        </div>
+
+        {% if pair.enabled %}
+          <div class="pair-body">
+            <div class="pair-controls">
+              <form method="post" action="{{ url_for('set_pair_color') }}" class="inline-form">
+                <input type="hidden" name="source_account_label" value="{{ pair.label }}">
+                <input type="hidden" name="dest_account_label" value="{{ account.label }}">
+                <input type="hidden" name="return_account_id" value="{{ account.id }}">
+                <label for="color-{{ pair.label }}">Event color</label>
+                <select
+                  id="color-{{ pair.label }}" name="color_id"
+                  onchange="this.form.submit()"
+                  style="border-left: 0.8em solid {{ event_colors[pair.color_id][1] if pair.color_id else '#ccc' }};"
+                >
+                  <option value="" {{ "selected" if not pair.color_id }}>Default</option>
+                  {% for id, (name, hex, text) in event_colors.items() %}
+                    <option
+                      value="{{ id }}" {{ "selected" if pair.color_id == id }}
+                      style="background-color: {{ hex }}; color: {{ text }};"
+                    >{{ name }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+
+              {% if pair.full_copy %}
+                <form method="post" action="{{ url_for('set_pair_template') }}" class="mt-1">
                   <input type="hidden" name="source_account_label" value="{{ pair.label }}">
                   <input type="hidden" name="dest_account_label" value="{{ account.label }}">
-                  <input type="hidden" name="mode" value="{{ 'busy_only' if pair.full_copy else 'full' }}">
                   <input type="hidden" name="return_account_id" value="{{ account.id }}">
-                  <button class="btn btn-outline-secondary btn-sm" type="submit">
-                    {{ "Disable custom template" if pair.full_copy else "Enable custom template" }}
-                  </button>
+                  <p class="muted small mb-0">
+                    Placeholders: {title}, {description}, {calendar}
+                  </p>
+                  <label class="sr-only" for="title-template-{{ loop.index }}">Title template for {{ pair.display_name or pair.email }}</label>
+                  <input
+                    id="title-template-{{ loop.index }}" type="text" name="title_template" maxlength="500"
+                    placeholder="Title template (default: {title})"
+                    value="{{ pair.title_template }}"
+                    class="stack-sm"
+                  >
+                  <label class="sr-only" for="description-template-{{ loop.index }}">Description template for {{ pair.display_name or pair.email }}</label>
+                  <input
+                    id="description-template-{{ loop.index }}" type="text" name="description_template" maxlength="500"
+                    placeholder="Description template (default: {description})"
+                    value="{{ pair.description_template }}"
+                    class="stack-sm"
+                  >
+                  <button class="btn btn-sm mt-1" type="submit">Save template</button>
                 </form>
               {% endif %}
             </div>
-          </div>
 
-          {% if pair.enabled %}
-            <form method="post" action="{{ url_for('set_pair_color') }}" class="mt-3">
-              <input type="hidden" name="source_account_label" value="{{ pair.label }}">
-              <input type="hidden" name="dest_account_label" value="{{ account.label }}">
-              <input type="hidden" name="return_account_id" value="{{ account.id }}">
-              <label class="text-muted small me-2" for="color-{{ pair.label }}">Event color:</label>
-              <select
-                class="form-select form-select-sm d-inline-block w-auto"
-                id="color-{{ pair.label }}" name="color_id"
-                onchange="this.form.submit()"
-                style="border-left: 0.8em solid {{ event_colors[pair.color_id][1] if pair.color_id else '#ccc' }};"
-              >
-                <option value="" {{ "selected" if not pair.color_id }}>Default</option>
-                {% for id, (name, hex, text) in event_colors.items() %}
-                  <option
-                    value="{{ id }}" {{ "selected" if pair.color_id == id }}
-                    style="background-color: {{ hex }}; color: {{ text }};"
-                  >{{ name }}</option>
-                {% endfor %}
-              </select>
-            </form>
-          {% endif %}
-
-          {% if pair.enabled and pair.full_copy %}
-            <form method="post" action="{{ url_for('set_pair_template') }}" class="mt-3">
-              <input type="hidden" name="source_account_label" value="{{ pair.label }}">
-              <input type="hidden" name="dest_account_label" value="{{ account.label }}">
-              <input type="hidden" name="return_account_id" value="{{ account.id }}">
-              <p class="text-muted small mb-2">
-                Placeholders: {title}, {description}, {calendar}
+            <div class="preview">
+              <div class="preview-label">Preview</div>
+              <div class="preview-chip" style="border-left-color: {{ event_colors[pair.color_id][1] if pair.color_id else 'var(--ink)' }};">
+                <div class="preview-chip-title">{{ pair.preview_title }}</div>
+                {% if pair.preview_description %}
+                  <div class="preview-chip-desc">{{ pair.preview_description }}</div>
+                {% endif %}
+              </div>
+              <p class="muted small mt-1 mb-0">
+                {% if pair.full_copy %}
+                  Sample event, as it'll appear once mirrored.
+                {% else %}
+                  Busy/free only — no title or description is copied.
+                {% endif %}
               </p>
-              <input
-                class="form-control mb-2"
-                type="text" name="title_template" maxlength="500"
-                placeholder="Title template (default: {title})"
-                value="{{ pair.title_template }}"
-              >
-              <input
-                class="form-control mb-2"
-                type="text" name="description_template" maxlength="500"
-                placeholder="Description template (default: {description})"
-                value="{{ pair.description_template }}"
-              >
-              <button class="btn btn-outline-secondary btn-sm" type="submit">Save template</button>
-            </form>
-          {% endif %}
-        </div>
+            </div>
+          </div>
+        {% endif %}
       </div>
     {% endfor %}
   {% else %}
-    <p class="text-muted mt-4">
+    <p class="muted mt-2">
       Connect at least one more calendar to configure sync connections for this one.
     </p>
   {% endif %}
 
-  <form class="mt-4" method="post" action="{{ url_for('disconnect', account_id=account.id) }}"
+  <form class="mt-3" method="post" action="{{ url_for('disconnect', account_id=account.id) }}"
         onsubmit="return confirm('Disconnect this calendar? Already-created Busy blocks on your other calendars won\'t be removed automatically.');">
-    <button class="btn btn-outline-danger" type="submit">Disconnect this calendar</button>
+    <button class="btn btn-danger" type="submit">Disconnect this calendar</button>
   </form>
 {% endblock %}

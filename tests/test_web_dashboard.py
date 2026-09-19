@@ -121,6 +121,31 @@ def test_calendar_detail_shows_pair_toggle_for_two_accounts(tmp_path):
     db.close()
 
 
+def test_calendar_detail_uses_accessible_labels_and_compact_help(tmp_path):
+    client, db = _client(tmp_path)
+    tenant_id = _sign_in(client, db)
+    for label in ("a@example.com", "b@example.com"):
+        db.upsert_connected_account(
+            tenant_id=tenant_id, account_label=label,
+            google_email=label, calendar_id=label, credentials_json="cipher",
+        )
+    account_id = _account_id(db, tenant_id, "a@example.com")
+    db.set_pair_copy_mode(tenant_id, "b@example.com", "a@example.com", "full")
+
+    resp = client.get(f"/calendars/{account_id}")
+
+    assert b'for="calendar-display-name"' in resp.data
+    assert b'id="calendar-display-name"' in resp.data
+    assert b'for="sync-window-days"' in resp.data
+    assert b'id="sync-window-days"' in resp.data
+    assert b'for="title-template-1"' in resp.data
+    assert b'id="title-template-1"' in resp.data
+    assert b'for="description-template-1"' in resp.data
+    assert b'id="description-template-1"' in resp.data
+    assert b"<summary>How mirroring works</summary>" in resp.data
+    db.close()
+
+
 def test_calendar_detail_requires_login(tmp_path):
     client, db = _client(tmp_path)
     resp = client.get("/calendars/1")

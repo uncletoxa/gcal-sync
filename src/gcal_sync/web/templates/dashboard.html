@@ -2,7 +2,7 @@
 {% block title %}Dashboard — GCal Sync{% endblock %}
 {% block body %}
   <h1>Your calendars</h1>
-  <p class="text-muted">Signed in as {{ tenant_email }}</p>
+  <p class="muted">Signed in as {{ tenant_email }}</p>
 
   {% if needs_second_account %}
     <div class="alert alert-warning">
@@ -20,34 +20,34 @@
     <div class="alert alert-success">{{ sync_success }}</div>
   {% endif %}
 
-  <div class="list-group mb-3">
+  <div class="rowlist">
     {% for account in accounts %}
-      <div class="list-group-item d-flex justify-content-between align-items-center">
+      <div class="rowlist-item">
         <div>
           <strong>{{ account.display_name or account.email }}</strong><br>
           {% if account.display_name %}
-            <span class="text-muted small">{{ account.email }}</span><br>
+            <span class="muted small">{{ account.email }}</span><br>
           {% endif %}
-          <span class="text-muted small">
-            {% if account.last_synced %}Last synced {{ account.last_synced|human_time }}{% else %}Not yet synced{% endif %}
+          <span class="muted small num">
+            {% if account.last_synced %}Synced {{ account.last_synced|human_time }}{% else %}Not yet synced{% endif %}
           </span>
         </div>
-        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('calendar_detail', account_id=account.id) }}">Manage</a>
+        <a class="rowlist-action" href="{{ url_for('calendar_detail', account_id=account.id) }}">Manage &rarr;</a>
       </div>
     {% endfor %}
   </div>
 
-  <a class="btn btn-primary mb-4" href="{{ url_for('login') }}">Connect another calendar</a>
+  <a class="btn btn-primary" href="{{ url_for('login') }}">Connect another calendar</a>
 
-  <div class="d-flex gap-2">
+  <div class="actions-row">
     {% if not needs_second_account %}
       <form method="post" action="{{ url_for('sync_now') }}">
-        <button class="btn btn-outline-secondary" type="submit">Sync calendars</button>
+        <button class="btn" type="submit">Sync calendars</button>
       </form>
     {% endif %}
 
     <form method="post" action="{{ url_for('logout') }}">
-      <button class="btn btn-outline-secondary" type="submit">Sign out</button>
+      <button class="btn" type="submit">Sign out</button>
     </form>
   </div>
 {% endblock %}

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .. import web_auth
+from .. import sync_engine, web_auth
 from ..config import MAX_SYNC_WINDOW_DAYS, Config, load_config
 from ..db import Database
 from ..errors import AuthenticationError
@@ -30,6 +30,16 @@ EVENT_COLORS = {
     "9": ("Blueberry", "#3f51b5", "#fff"),
     "10": ("Basil", "#0b8043", "#fff"),
     "11": ("Tomato", "#d60000", "#fff"),
+}
+
+# Sample source event used to render a live "what will this mirror look like" preview
+# on the calendar settings page, via the exact same rendering path sync uses.
+PREVIEW_EVENT = {
+    "id": "preview",
+    "summary": "Team standup",
+    "description": "Weekly sync call",
+    "start": {"dateTime": "2026-01-01T09:00:00Z", "timeZone": "UTC"},
+    "end": {"dateTime": "2026-01-01T09:30:00Z", "timeZone": "UTC"},
 }
 
 
@@ -171,23 +181,35 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
         pair_templates = db.get_pair_templates(tenant_id)
         pair_colors = db.get_pair_colors(tenant_id)
         other_accounts = [acc for acc in accounts if acc["id"] != account_id]
-        incoming = [
-            {
+        incoming = []
+        for other in other_accounts:
+            pair_key = (other["account_label"], account["account_label"])
+            full_copy = pair_key in full_copy_pairs
+            title_template = pair_templates.get(pair_key, (None, None))[0] or ""
+            description_template = pair_templates.get(pair_key, (None, None))[1] or ""
+            color_id = pair_colors.get(pair_key) or ""
+            preview = sync_engine.build_mirror_body(
+                PREVIEW_EVENT,
+                source_account=other["account_label"],
+                source_calendar_id="preview",
+                full_copy=full_copy,
+                title_template=title_template or None,
+                description_template=description_template or None,
+                calendar_name=other["display_name"] or other["google_email"],
+                color_id=color_id or None,
+            )
+            incoming.append({
                 "label": other["account_label"],
                 "email": other["google_email"],
                 "display_name": other["display_name"] or "",
-                "full_copy": (other["account_label"], account["account_label"]) in full_copy_pairs,
-                "enabled": (other["account_label"], account["account_label"]) not in disabled_pairs,
-                "title_template": pair_templates.get(
-                    (other["account_label"], account["account_label"]), (None, None)
-                )[0] or "",
-                "description_template": pair_templates.get(
-                    (other["account_label"], account["account_label"]), (None, None)
-                )[1] or "",
-                "color_id": pair_colors.get((other["account_label"], account["account_label"])) or "",
-            }
-            for other in other_accounts
-        ]
+                "full_copy": full_copy,
+                "enabled": pair_key not in disabled_pairs,
+                "title_template": title_template,
+                "description_template": description_template,
+                "color_id": color_id,
+                "preview_title": preview["summary"],
+                "preview_description": preview.get("description", ""),
+            })
         return render_template(
             "calendar.html",
             account={
