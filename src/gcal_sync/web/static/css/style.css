@@ -151,6 +151,9 @@ a:hover { color: var(--accent); }
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: var(--fs-body);
@@ -160,6 +163,13 @@ a:hover { color: var(--accent); }
 }
 
 .brand:hover { color: var(--ink); }
+
+.brand-mark {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+}
 
 .page {
   flex-grow: 1;

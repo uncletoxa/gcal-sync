@@ -4,12 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}GCal Sync{% endblock %}</title>
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
 <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
   <nav class="site-nav">
-    <a class="brand" href="{{ url_for('index') }}">GCal Sync</a>
+    <a class="brand" href="{{ url_for('index') }}">
+      <img class="brand-mark" src="{{ url_for('static', filename='logo-mark.svg') }}" alt="" width="28" height="28">
+      <span>GCal Sync</span>
+    </a>
   </nav>
 
   <main class="page">
