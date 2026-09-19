@@ -48,6 +48,23 @@ def test_sync_button_hidden_with_fewer_than_two_accounts(tmp_path):
     db.close()
 
 
+def test_web_fonts_are_self_hosted_and_disclosed(tmp_path):
+    client, db = _client(tmp_path)
+
+    index = client.get("/")
+    assert b"fonts.googleapis.com" not in index.data
+    assert b"fonts.gstatic.com" not in index.data
+
+    font = client.get("/static/fonts/archivo-latin.woff2")
+    assert font.status_code == 200
+
+    privacy = client.get("/privacy")
+    assert b"font files are" in privacy.data
+    assert b"served locally" in privacy.data
+    assert b"does not contact Google Fonts" in privacy.data
+    db.close()
+
+
 def test_sync_button_shown_with_two_accounts(tmp_path):
     client, db = _client(tmp_path)
     tenant_id = _sign_in(client, db)
