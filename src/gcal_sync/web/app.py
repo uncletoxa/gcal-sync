@@ -152,7 +152,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 "id": acc["id"],
                 "email": acc["google_email"],
                 "display_name": acc["display_name"] or "",
-                "last_synced": db.get_last_full_sync(
+                "last_synced": db.get_last_checked(
                     web_auth.tenant_account_key(tenant_id, acc["account_label"])
                 ),
             }
@@ -217,7 +217,7 @@ def create_app(cfg: Config | None = None, db: Database | None = None) -> Flask:
                 "label": account["account_label"],
                 "email": account["google_email"],
                 "display_name": account["display_name"] or "",
-                "last_synced": db.get_last_full_sync(
+                "last_synced": db.get_last_checked(
                     web_auth.tenant_account_key(tenant_id, account["account_label"])
                 ),
                 "sync_window_days": account["sync_window_days"],

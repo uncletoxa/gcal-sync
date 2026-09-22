@@ -9,7 +9,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sync_state (
     calendar_key TEXT PRIMARY KEY,
     sync_token TEXT,
-    last_full_sync_at TEXT
+    last_full_sync_at TEXT,
+    last_checked_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS event_mappings (
@@ -94,6 +95,10 @@ class Database:
         if "display_name" not in account_columns:
             self._conn.execute("ALTER TABLE connected_accounts ADD COLUMN display_name TEXT")
 
+        sync_state_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(sync_state)")}
+        if "last_checked_at" not in sync_state_columns:
+            self._conn.execute("ALTER TABLE sync_state ADD COLUMN last_checked_at TEXT")
+
         pair_columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(pair_settings)")}
         if "enabled" not in pair_columns:
             self._conn.execute("ALTER TABLE pair_settings ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
@@ -137,6 +142,26 @@ class Database:
             INSERT INTO sync_state (calendar_key, sync_token, last_full_sync_at)
             VALUES (?, NULL, ?)
             ON CONFLICT(calendar_key) DO UPDATE SET last_full_sync_at = excluded.last_full_sync_at
+            """,
+            (calendar_key, iso_timestamp),
+        )
+        self._conn.commit()
+
+    def get_last_checked(self, calendar_key: str) -> Optional[str]:
+        """When this calendar's source events were last fetched, whether that pass was
+        full or incremental — what the dashboard shows as "Synced", since incremental
+        passes (the common case) don't move last_full_sync_at."""
+        row = self._conn.execute(
+            "SELECT last_checked_at FROM sync_state WHERE calendar_key = ?", (calendar_key,)
+        ).fetchone()
+        return row["last_checked_at"] if row else None
+
+    def set_last_checked(self, calendar_key: str, iso_timestamp: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO sync_state (calendar_key, sync_token, last_checked_at)
+            VALUES (?, NULL, ?)
+            ON CONFLICT(calendar_key) DO UPDATE SET last_checked_at = excluded.last_checked_at
             """,
             (calendar_key, iso_timestamp),
         )

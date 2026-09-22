@@ -619,8 +619,10 @@ def sync_all_pairs(
             )
 
         if not dry_run:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            db.set_last_checked(source_account, now_iso)
             if source_force_full:
-                db.set_last_full_sync(source_account, datetime.now(timezone.utc).isoformat())
+                db.set_last_full_sync(source_account, now_iso)
             if next_sync_token:
                 db.set_sync_token(source_account, next_sync_token)
 

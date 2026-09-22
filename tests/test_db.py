@@ -68,6 +68,28 @@ def test_sync_token_and_full_sync_timestamp_roundtrip(tmp_path):
     db.close()
 
 
+def test_last_checked_independent_of_full_sync(tmp_path):
+    db = Database(str(tmp_path / "s.sqlite3"))
+
+    assert db.get_last_checked("workspace") is None
+    db.set_last_checked("workspace", "2026-01-01T00:10:00+00:00")
+    assert db.get_last_checked("workspace") == "2026-01-01T00:10:00+00:00"
+
+    # an incremental pass updates last_checked_at but never last_full_sync_at
+    assert db.get_last_full_sync("workspace") is None
+    db.set_last_checked("workspace", "2026-01-01T00:20:00+00:00")
+    assert db.get_last_checked("workspace") == "2026-01-01T00:20:00+00:00"
+    assert db.get_last_full_sync("workspace") is None
+
+    # a later full sync updates last_full_sync_at without clobbering last_checked_at
+    db.set_last_full_sync("workspace", "2026-01-01T00:20:00+00:00")
+    db.set_last_checked("workspace", "2026-01-02T00:00:00+00:00")
+    assert db.get_last_checked("workspace") == "2026-01-02T00:00:00+00:00"
+    assert db.get_last_full_sync("workspace") == "2026-01-01T00:20:00+00:00"
+
+    db.close()
+
+
 def test_list_active_mappings_for_pair(tmp_path):
     db = Database(str(tmp_path / "s.sqlite3"))
     db.upsert_mapping(
